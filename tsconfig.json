@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packages", "demo"]
+  "include": ["packages", "demo", "server", "netlify"]
 }

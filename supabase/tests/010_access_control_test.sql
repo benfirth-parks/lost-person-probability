@@ -33,6 +33,12 @@ insert into research.clues (id, incident_id, clue_type, available_at, geometry, 
   ('40000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000001', 'located_item', '2026-07-19 00:40:00+00',
    'SRID=4326;POINT(-116.21 51.41)', '{"horizontal_m":20}', 'team', 'A', 'high', 'Item found upstream', null, 'active',
    '00000000-0000-0000-0000-0000000000a1');
+insert into research.search_domains (id, incident_id, geometry, spatial_representation, cell_size_m, coordinate_reference,
+  outside_probability, outside_rationale, model_version_id, created_by, grid) values
+  ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
+   'SRID=4326;MULTIPOLYGON(((-117 51,-116.97 51,-116.97 51.015,-117 51.015,-117 51)))', 'raster', 100, 'EPSG:32611', 0.1, 'fixture',
+   '20000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a1',
+   '{"crs":"EPSG:32611","originX":500000,"originY":5700000,"cellSize":100,"cols":20,"rows":15}');
 insert into restricted.found_locations (incident_id, encrypted_geometry, source_system, source_record_id, access_class) values
   ('30000000-0000-0000-0000-000000000001', 'v1:sealed-outcome-ciphertext', 'fixture', 'fx-1', 'protected_outcome');
 commit;
@@ -85,40 +91,40 @@ do $$ begin
 end $$;
 
 -- Trainee commits a prior surface and an update.
-insert into research.probability_surfaces (id, incident_id, iteration, surface_type, storage_format, values_hash,
+insert into research.probability_surfaces (id, search_domain_id, incident_id, iteration, surface_type, storage_format, values_hash,
   in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, created_by)
-values ('50000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, 'prior', 'float64-le+gzip', 'h0',
+values ('50000000-0000-0000-0000-000000000001', '70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, 'prior', 'float64-le+gzip', 'h0',
   0.9, 0.1, 1, 1, '20000000-0000-0000-0000-000000000001', 'i0', '00000000-0000-0000-0000-0000000000c1');
-insert into research.probability_surfaces (id, incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
+insert into research.probability_surfaces (id, search_domain_id, incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
   in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, rationale, created_by)
-values ('50000000-0000-0000-0000-000000000002', '30000000-0000-0000-0000-000000000001', 1, '50000000-0000-0000-0000-000000000001',
+values ('50000000-0000-0000-0000-000000000002', '70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 1, '50000000-0000-0000-0000-000000000001',
   'clue_update', 'float64-le+gzip', 'h1', 0.92, 0.08, 1.3, 1, '20000000-0000-0000-0000-000000000001', 'i1',
   'Witness credible', '00000000-0000-0000-0000-0000000000c1');
 
 do $$ begin
   -- Cannot write as someone else.
   begin
-    insert into research.probability_surfaces (incident_id, iteration, surface_type, storage_format, values_hash,
+    insert into research.probability_surfaces (search_domain_id, incident_id, iteration, surface_type, storage_format, values_hash,
       in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, created_by)
-    values ('30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 1, 0, 1, 1, '20000000-0000-0000-0000-000000000001', 'i',
+    values ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 1, 0, 1, 1, '20000000-0000-0000-0000-000000000001', 'i',
             '00000000-0000-0000-0000-0000000000e1');
     raise exception 'FAIL trainee wrote a surface as another user';
   exception when insufficient_privilege then null;
   end;
   -- Probabilities must add up.
   begin
-    insert into research.probability_surfaces (incident_id, iteration, surface_type, storage_format, values_hash,
+    insert into research.probability_surfaces (search_domain_id, incident_id, iteration, surface_type, storage_format, values_hash,
       in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, created_by)
-    values ('30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 0.9, 0.2, 1, 1.1, '20000000-0000-0000-0000-000000000001', 'i',
+    values ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 0.9, 0.2, 1, 1.1, '20000000-0000-0000-0000-000000000001', 'i',
             '00000000-0000-0000-0000-0000000000c1');
     raise exception 'FAIL surface with probability sum 1.1 accepted';
   exception when check_violation then null;
   end;
   -- Iteration must follow the parent.
   begin
-    insert into research.probability_surfaces (incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
+    insert into research.probability_surfaces (search_domain_id, incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
       in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, rationale, created_by)
-    values ('30000000-0000-0000-0000-000000000001', 5, '50000000-0000-0000-0000-000000000001', 'search_update', 'f', 'h', 1, 0, 1, 1,
+    values ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 5, '50000000-0000-0000-0000-000000000001', 'search_update', 'f', 'h', 1, 0, 1, 1,
             '20000000-0000-0000-0000-000000000001', 'i', 'no find', '00000000-0000-0000-0000-0000000000c1');
     raise exception 'FAIL out-of-sequence iteration accepted';
   exception when raise_exception then
@@ -126,9 +132,9 @@ do $$ begin
   end;
   -- Updates need a rationale.
   begin
-    insert into research.probability_surfaces (incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
+    insert into research.probability_surfaces (search_domain_id, incident_id, iteration, parent_surface_id, surface_type, storage_format, values_hash,
       in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, created_by)
-    values ('30000000-0000-0000-0000-000000000001', 1, '50000000-0000-0000-0000-000000000001', 'search_update', 'f', 'h', 1, 0, 1, 1,
+    values ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 1, '50000000-0000-0000-0000-000000000001', 'search_update', 'f', 'h', 1, 0, 1, 1,
             '20000000-0000-0000-0000-000000000001', 'i', '00000000-0000-0000-0000-0000000000c1');
     raise exception 'FAIL update without rationale accepted';
   exception when check_violation then null;
@@ -289,9 +295,9 @@ set local role authenticated;
 do $$ begin
   assert (select count(*) from research.search_incidents) = 1, 'FAIL analyst cannot read case';
   begin
-    insert into research.probability_surfaces (incident_id, iteration, surface_type, storage_format, values_hash,
+    insert into research.probability_surfaces (search_domain_id, incident_id, iteration, surface_type, storage_format, values_hash,
       in_domain_probability, outside_domain_probability, normalization_constant, probability_sum, model_version_id, input_hash, created_by)
-    values ('30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 1, 0, 1, 1, '20000000-0000-0000-0000-000000000001', 'i',
+    values ('70000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, 'prior', 'f', 'h', 1, 0, 1, 1, '20000000-0000-0000-0000-000000000001', 'i',
             '00000000-0000-0000-0000-0000000000b1');
     raise exception 'FAIL analyst wrote a surface';
   exception when insufficient_privilege then null;
