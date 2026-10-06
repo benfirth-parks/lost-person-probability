@@ -14,7 +14,7 @@ import {
   type Grid,
   type Point,
   type TrackPoint,
-} from '../packages/probability-engine/src/index.ts';
+} from '../probability-engine/src/index.ts';
 
 export const CASE_CODE = 'ALPINE-EX-01';
 export const INFORMATION_CUTOFF = '2026-07-18T16:00:00-06:00';

@@ -238,7 +238,11 @@ describe('outcome encryption', () => {
     const token = encryptFindLocation(FIND, INCIDENT, keys.get('k1')!);
     expect(decryptFindLocation(token, INCIDENT, keys)).toEqual(FIND);
     expect(() => decryptFindLocation(token, '30000000-0000-0000-0000-000000000099', keys)).toThrow();
-    expect(() => decryptFindLocation(token.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')), INCIDENT, keys)).toThrow();
+    const parts = token.split(':');
+    const ct = Buffer.from(parts[4]!, 'base64url');
+    ct[0] = ct[0]! ^ 0x01;
+    const tampered = [...parts.slice(0, 4), ct.toString('base64url')].join(':');
+    expect(() => decryptFindLocation(tampered, INCIDENT, keys)).toThrow();
     expect(() => loadOutcomeKeys({ OUTCOME_KEYS: 'k1:short' })).toThrow();
   });
 });

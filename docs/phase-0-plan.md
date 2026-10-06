@@ -36,8 +36,8 @@ Prepared 2026-10-06 against `lost-person-mapper-build.md`.
 ## Proposed next phases
 
 1. **Repository and CI.** Push this to the private repo on a branch, open a PR, add GitHub Actions running `npm run check`.
-2. **Phase 1 backend.** Done locally: migrations for the canonical schema (UUIDs, UTC, PostGIS, RLS deny-by-default), immutable surfaces, append-only audit, restricted outcomes reachable only through `research.reveal_outcome` after lock, and SQL tests for every role. Still to do: a database adapter honouring the `SurfaceStore` contract and the Netlify function that decrypts the outcome.
-3. **Phase 1 app shell.** React + Vite + TypeScript + MapLibre with a self-hosted basemap, porting the demo workspace into `/incident/:id/map`, `/scenarios`, `/update`, `/history`, `/evaluation`.
+2. **Phase 1 backend.** Done locally: migrations for the canonical schema (UUIDs, UTC, PostGIS, RLS deny-by-default), immutable surfaces, append-only audit, restricted outcomes reachable only through `research.reveal_outcome` after lock, and SQL tests for every role. Also done: the `/api/v1` Netlify function (surface blobs stored as float64 with hashes, idempotency keys, lock and reveal with AES-256-GCM outcome decryption that never persists the plaintext), with integration tests per role.
+3. **Phase 1 app shell.** Done locally: React + Vite + TypeScript + MapLibre with a locally rendered hillshade (no external tiles), `/incidents`, `/incident/:id/map` with scenario, clue, search, history and evaluation tabs, and `/admin`. It runs on an in-browser training data source; switching it to the API needs Supabase sign-in, which waits on the hosting decision below.
 4. **Importer and one de-identified case**, once a case and hosting are approved.
 
 Surface storage: start with one compressed Float64 blob per surface in object storage plus summary rows (`probability_surfaces`), not one row per cell. A 160 × 125 grid is 160 KB raw per surface.

@@ -52,7 +52,7 @@ import {
   ZONES,
   type ExerciseAssignment,
   type ExerciseClue,
-} from './exercise.ts';
+} from '../packages/exercises/alpine-ex-01.ts';
 
 // ---------------------------------------------------------------------------
 // State

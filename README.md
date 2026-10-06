@@ -6,7 +6,7 @@ An auditable decision-support engine that builds and updates a probability-of-ar
 
 The authoritative brief is `lost-person-mapper-build.md` in the project files. `docs/phase-0-plan.md` maps that brief onto what exists now and what comes next.
 
-## What is here (first slice)
+## What is here
 
 | Path | Contents |
 |---|---|
@@ -16,7 +16,10 @@ The authoritative brief is `lost-person-mapper-build.md` in the project files. `
 | `packages/domain` | Dependency-free SHA-256 and canonical JSON for input hashes |
 | `supabase/migrations` | PostGIS schema for the canonical tables, immutability triggers, row-level security, audit log, and the lock/reveal functions |
 | `supabase/tests` | Role-by-role access, leakage and immutability tests |
-| `demo/` | ALPINE-EX-01, an authored training exercise on synthetic terrain, and a single-page workspace built on the engine |
+| `packages/exercises` | ALPINE-EX-01, an authored training exercise on synthetic terrain (exercise values only) |
+| `server/`, `netlify/functions/api.ts` | `/api/v1` on Netlify Functions: commit surfaces, history, rollback, evaluation create, leakage check, lock, reveal, results. Queries run as the signed-in user so RLS applies; find locations are AES-256-GCM encrypted with the incident id bound in |
+| `src/` | React + MapLibre app: cases list, map workspace (scenarios, clues, search and POD, history, evaluate), read-only administration. Runs on an in-browser training data source until Supabase is configured; no external tiles, fonts or requests |
+| `demo/` | The earlier single-file workspace, kept as a shareable static page |
 
 All probability maths is pure and deterministic with no UI dependency.
 
@@ -27,7 +30,11 @@ npm install
 npm test            # hand-calculated fixtures + property-based invariant tests
 npm run typecheck
 npm run build:demo  # writes dist/demo.html (self-contained)
+npm run build       # writes the app to dist/app
 npm run check       # all of the above
+npx vite            # app dev server
+
+# API integration tests run when TEST_DATABASE_URL points at a database with the migrations applied
 
 # Database (needs a disposable Postgres 16 + PostGIS; CI uses postgis/postgis:16-3.4)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres scripts/db-test.sh
@@ -43,4 +50,4 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres scripts/db-t
 
 ## Not yet built
 
-Supabase project setup and authentication wiring, Netlify functions (including outcome decryption), React/MapLibre app shell, importers, offline PWA packaging. See `docs/phase-0-plan.md`.
+Supabase project setup and sign-in wiring (the app does not yet call the API), importers for real retrospective cases, offline PWA packaging. See `docs/phase-0-plan.md`.
