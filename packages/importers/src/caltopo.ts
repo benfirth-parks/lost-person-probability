@@ -17,8 +17,10 @@ import { assessTrack, type TrackPoint, type TrackReport } from '../../pod-engine
  * (`properties.class`, `title`, `number`, `status`, coordinates with an
  * optional epoch-millisecond fourth element). A real BYK search-map template
  * export confirmed the folder, marker and coordinate layout (untimed
- * coordinates carry 0 as the fourth element); assignment and recorded-track
- * features have not yet been seen in a real export.
+ * coordinates carry 0 as the fourth element). A real incident export
+ * confirmed polygon assignments identified by `letter` with `status` and
+ * `resourceType`, and timestamped aircraft tracks. A timestamped ground track
+ * has not yet been seen in a real export.
  */
 export const IMPORTER_VERSION = 'caltopo-import@0.1.0';
 
@@ -28,6 +30,8 @@ export interface ImportedAssignment {
   readonly sourceId: string;
   readonly label: string;
   readonly status: string | null;
+  /** CalTopo resource type (GROUND, AIR, ...). Only ground search has an approved POD model. */
+  readonly resourceType: string | null;
   readonly area: Polygon;
   /** Planned area only. Searched coverage comes from tracks, never from this polygon. */
   readonly kind: 'planned_area';
@@ -38,6 +42,26 @@ export interface ImportedTrack {
   readonly label: string;
   readonly points: readonly TrackPoint[];
   readonly report: TrackReport;
+  /** Median speed above any ground pace: almost certainly an aircraft track. */
+  readonly likelyAircraft: boolean;
+}
+
+/** 10 m/s (36 km/h): no ground team sustains this as a median speed. */
+export const AIRCRAFT_MEDIAN_SPEED_MPS = 10;
+
+function medianSpeed(points: readonly TrackPoint[]): number {
+  const v: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const dt = (points[i]!.t - points[i - 1]!.t) / 1000;
+    if (dt > 0) v.push(Math.hypot(points[i]!.x - points[i - 1]!.x, points[i]!.y - points[i - 1]!.y) / dt);
+  }
+  if (!v.length) return 0;
+  v.sort((a, b) => a - b);
+  return v[Math.floor(v.length / 2)]!;
+}
+
+function track(sourceId: string, labelText: string, points: TrackPoint[]): ImportedTrack {
+  return { sourceId, label: labelText, points, report: assessTrack(points), likelyAircraft: medianSpeed(points) > AIRCRAFT_MEDIAN_SPEED_MPS };
 }
 
 export interface ImportResult {
@@ -130,14 +154,16 @@ export function parseCaltopoGeoJson(text: string, project: Project): ImportResul
       const area = ring(geom.coordinates?.[0], project);
       const errs = area ? validatePolygon(area) : ['polygon coordinates are malformed'];
       if (!area || errs.length) {
-        skipped.push({ sourceId, reason: errs.join('; ') });
+        skipped.push({ sourceId, reason: `assignment outline is invalid (${errs.join('; ')}); fix it in CalTopo and export again` });
         return;
       }
-      const num = typeof props.number === 'string' || typeof props.number === 'number' ? String(props.number) : '';
+      // CalTopo identifies assignments by letter (A, B, ...) and sometimes a number.
+      const id = [props.letter, props.number].filter((v) => typeof v === 'string' || typeof v === 'number').map(String).join('');
       assignments.push({
         sourceId,
-        label: label(num ? `${num} ${props.title ?? ''}` : props.title, `Assignment ${assignments.length + 1}`),
+        label: label(id ? `${id} ${props.title ?? ''}` : props.title, `Assignment ${assignments.length + 1}`),
         status: typeof props.status === 'string' ? props.status : null,
+        resourceType: typeof props.resourceType === 'string' ? props.resourceType.toUpperCase() : null,
         area,
         kind: 'planned_area',
       });
@@ -150,7 +176,7 @@ export function parseCaltopoGeoJson(text: string, project: Project): ImportResul
         skipped.push({ sourceId, reason: pts });
         return;
       }
-      tracks.push({ sourceId, label: label(props.title, `Track ${tracks.length + 1}`), points: pts, report: assessTrack(pts) });
+      tracks.push(track(sourceId, label(props.title, `Track ${tracks.length + 1}`), pts));
       return;
     }
 
@@ -192,7 +218,7 @@ export function parseGpx(text: string, project: Project): ImportResult {
     }
     if (!problem && pts.length < 2) problem = 'segment has fewer than 2 points';
     if (problem) skipped.push({ sourceId, reason: problem });
-    else tracks.push({ sourceId, label: `GPX segment ${i + 1}`, points: pts, report: assessTrack(pts) });
+    else tracks.push(track(sourceId, `GPX segment ${i + 1}`, pts));
   });
   if (!segs.length) skipped.push({ sourceId: 'file', reason: 'no track segments found (routes and waypoints are not imported)' });
   return { importerVersion: IMPORTER_VERSION, sourceHash: hashValue(text), assignments: [], tracks, skipped };

@@ -248,7 +248,8 @@ function ImportSection() {
     try {
       const result = parseSearchFile(await file.text(), lngLatToLocal);
       const pairs: Record<string, ImportPairing> = {};
-      result.assignments.forEach((a, i) => (pairs[a.sourceId] = { trackId: result.tracks[i]?.sourceId ?? null, ...DEFAULT_IMPORT_PAIRING }));
+      // No automatic pairing: which team walked which area is for the planner to say.
+      result.assignments.forEach((a) => (pairs[a.sourceId] = { trackId: null, ...DEFAULT_IMPORT_PAIRING }));
       w.actions.setImported({ fileName: file.name.slice(0, 60), result, pairs });
       w.actions.toast(`Read ${result.assignments.length} assignment${result.assignments.length === 1 ? '' : 's'} and ${result.tracks.length} track${result.tracks.length === 1 ? '' : 's'}.`);
     } catch (e) {
@@ -287,7 +288,10 @@ function ImportSection() {
             const pair = imp.pairs[src.sourceId]!;
             const track = imp.result.tracks.find((t) => t.sourceId === pair.trackId);
             const inside = track ? shareInsideGrid(track.points) : 1;
-            const blocked = !track
+            const aerial = src.resourceType === 'AIR' || Boolean(track?.likelyAircraft);
+            const blocked = aerial
+              ? 'Aerial search has no approved POD model yet, so it cannot update the map. It is shown for reference only.'
+              : !track
               ? 'Pair a recorded track first. A planned area alone is not achieved coverage.'
               : Date.parse(a.availableAt) > cutoff
                 ? 'This track ends after the information cutoff, so it cannot be used in this run.'
@@ -300,13 +304,14 @@ function ImportSection() {
                   <label className="field inline">Track
                     <select value={pair.trackId ?? ''} onChange={(e) => setPair(src.sourceId, { trackId: e.target.value || null })}>
                       <option value="">None</option>
-                      {imp.result.tracks.map((t) => <option key={t.sourceId} value={t.sourceId}>{t.label} ({t.report.quality})</option>)}
+                      {imp.result.tracks.map((t) => <option key={t.sourceId} value={t.sourceId}>{t.label} ({t.likelyAircraft ? 'aircraft' : t.report.quality})</option>)}
                     </select>
                   </label>
                   <label className="field inline">Planned spacing (m)
                     <input type="number" min={1} step={5} value={pair.plannedSpacingM} onChange={(e) => setPair(src.sourceId, { plannedSpacingM: Number(e.target.value) })} />
                   </label>
                 </div>
+                <p className="cap">CalTopo status {src.status ?? 'unknown'}{src.resourceType ? ` · ${src.resourceType.toLowerCase()}` : ''}{src.status === 'DRAFT' ? '. A draft assignment may never have been searched; rely only on its track.' : ''}</p>
                 {track && inside > 0 && inside < 1 && <p className="cap">{pct(1 - inside, 0)} of this track lies outside the case map and covers nothing.</p>}
               </AssignmentCard>
             );

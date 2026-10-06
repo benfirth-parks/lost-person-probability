@@ -15,14 +15,15 @@ describe('CalTopo GeoJSON import', () => {
           id: 'a1',
           type: 'Feature',
           geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] },
-          properties: { class: 'Assignment', number: '101', title: 'NE bench', status: 'COMPLETED', description: 'Subject Jane Doe last seen here' },
+          properties: { class: 'Assignment', letter: 'C', number: '101', title: 'NE bench', status: 'COMPLETED', resourceType: 'ground', description: 'Subject Jane Doe last seen here' },
         },
       ]),
       project,
     );
     expect(r.assignments).toHaveLength(1);
     const a = r.assignments[0]!;
-    expect(a.label).toBe('101 NE bench');
+    expect(a.label).toBe('C101 NE bench');
+    expect(a.resourceType).toBe('GROUND');
     expect(a.status).toBe('COMPLETED');
     expect(a.kind).toBe('planned_area');
     expect(a.area).toEqual([{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 1000 }, { x: 0, y: 1000 }]);
@@ -42,6 +43,7 @@ describe('CalTopo GeoJSON import', () => {
     expect(r.tracks[0]!.points).toEqual([{ x: 0, y: 0, t: T }, { x: 60, y: 0, t: T + 60_000 }]);
     expect(r.tracks[0]!.report.lengthM).toBeCloseTo(60, 9);
     expect(r.tracks[0]!.report.quality).toBe('good');
+    expect(r.tracks[0]!.likelyAircraft).toBe(false);
     expect(r.tracks[1]!.report.durationS).toBe(30);
   });
 
@@ -109,6 +111,12 @@ describe('GPX import', () => {
   it('flags impossible speeds through the track report', () => {
     const r = parseGpx(gpx([pt(0, 0, T), pt(1, 0, T + 10_000)]), project);
     expect(r.tracks[0]!.report.quality).toBe('suspect');
+  });
+
+  it('marks a track whose median speed is above ground pace as likely aircraft', () => {
+    // 250 m every 10 s = 25 m/s (90 km/h), like a helicopter search pattern.
+    const r = parseGpx(gpx(Array.from({ length: 6 }, (_, i) => pt(i * 0.25, 0, T + i * 10_000))), project);
+    expect(r.tracks[0]!.likelyAircraft).toBe(true);
   });
 });
 
