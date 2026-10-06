@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { checkInvariants, filterAvailable, probabilityOfSuccess, type CaseMetrics, type Distribution } from '../../../packages/probability-engine/src/index.ts';
-import { ASSIGNMENTS, CLUES, INFORMATION_CUTOFF, IPP_SIGMA_M } from '../../../packages/exercises/alpine-ex-01.ts';
+import { ASSIGNMENTS, CLUES, INFORMATION_CUTOFF, IPP_SIGMA_M, type ExerciseAssignment } from '../../../packages/exercises/alpine-ex-01.ts';
+import { parseSearchFile } from '../../../packages/importers/src/index.ts';
+import { lngLatToLocal } from '../../lib/georef.ts';
 import { clock, pct, prob } from './format.ts';
-import { buildPrior, podFor, previewClue, previewSearch, weightsValid, zoneSums } from './model.ts';
+import { buildPrior, DEFAULT_IMPORT_PAIRING, importedAssignments, podFor, previewClue, previewSearch, shareInsideGrid, weightsValid, zoneSums, type ImportPairing } from './model.ts';
 import { miniImage } from './raster.ts';
 import { useWorkspace } from './useWorkspace.ts';
 
@@ -208,35 +210,123 @@ export function CluesPanel() {
   );
 }
 
-export function SearchPanel() {
+function AssignmentCard({ a, sweepWidthM, onSweepWidth, blocked, children }: { a: ExerciseAssignment; sweepWidthM: number; onSweepWidth: (v: number) => void; blocked?: string; children?: React.ReactNode }) {
   const w = useWorkspace();
+  const p = podFor(a, sweepWidthM);
+  return (
+    <article className="item">
+      <header><b>{a.id}</b> {a.name} {w.applied.includes(a.id) && <Chip tone="ok">applied</Chip>}</header>
+      <p className="meta">{a.resource} · {a.method} · planned spacing {a.plannedSpacingM} m · {a.track.length ? <>track {p.quality}{p.gaps ? ` (${p.gaps} gap${p.gaps > 1 ? 's' : ''})` : ''}</> : 'no track'}</p>
+      {children}
+      <div className="tablewrap">
+        <table className="num">
+          <thead><tr><th /><th scope="col">Coverage</th><th scope="col">POD</th><th scope="col">POS</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Planned</th><td>{p.planned.summaryCoverage.toFixed(2)}</td><td>{pct(p.planned.summaryPod)}</td><td>{pct(probabilityOfSuccess(w.head, p.planned.pod), 2)}</td></tr>
+            <tr><th scope="row">Achieved</th><td>{p.achieved.summaryCoverage.toFixed(2)}</td><td>{pct(p.achieved.summaryPod)}</td><td>{pct(probabilityOfSuccess(w.head, p.achieved.pod), 2)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <label className="field inline">Effective sweep width (m, exercise value)
+        <input type="number" min={1} step={5} value={sweepWidthM} onChange={(e) => onSweepWidth(Number(e.target.value))} />
+      </label>
+      {blocked && <p className="cap warn-text">{blocked}</p>}
+      <button disabled={Boolean(blocked)} onClick={() => w.actions.setPreview(previewSearch(w.head, a, sweepWidthM))}>Preview no-find update</button>
+    </article>
+  );
+}
+
+function ImportSection() {
+  const w = useWorkspace();
+  const imp = w.imported;
+  const [busy, setBusy] = useState(false);
+  const cutoff = Date.parse(INFORMATION_CUTOFF);
+
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = parseSearchFile(await file.text(), lngLatToLocal);
+      const pairs: Record<string, ImportPairing> = {};
+      result.assignments.forEach((a, i) => (pairs[a.sourceId] = { trackId: result.tracks[i]?.sourceId ?? null, ...DEFAULT_IMPORT_PAIRING }));
+      w.actions.setImported({ fileName: file.name.slice(0, 60), result, pairs });
+      w.actions.toast(`Read ${result.assignments.length} assignment${result.assignments.length === 1 ? '' : 's'} and ${result.tracks.length} track${result.tracks.length === 1 ? '' : 's'}.`);
+    } catch (e) {
+      w.actions.toast((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const setPair = (id: string, patch: Partial<ImportPairing>) => imp && w.actions.setImported({ ...imp, pairs: { ...imp.pairs, [id]: { ...imp.pairs[id]!, ...patch } } });
+  const built = importedAssignments(imp);
+
+  return (
+    <section className="import">
+      <h3>Import from CalTopo or GPX</h3>
+      <p className="cap">Export assignments and tracks from CalTopo as GeoJSON, or a GPS track as GPX. The file is read in this browser and is not uploaded or sent anywhere. Descriptions and comments are dropped.</p>
+      <label className="field">
+        Search file
+        <input type="file" accept=".json,.geojson,.gpx,application/geo+json,application/json,application/gpx+xml" disabled={busy} onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ''; }} />
+      </label>
+      {imp && (
+        <>
+          <p className="meta">
+            {imp.fileName} · {imp.result.assignments.length} areas · {imp.result.tracks.length} tracks · source <code>{imp.result.sourceHash.slice(0, 12)}</code>{' '}
+            <button className="small" onClick={() => w.actions.setImported(null)}>Clear</button>
+          </p>
+          {imp.result.skipped.length > 0 && (
+            <details>
+              <summary>{imp.result.skipped.length} feature{imp.result.skipped.length === 1 ? '' : 's'} not imported</summary>
+              <ul className="cap">{imp.result.skipped.map((s) => <li key={s.sourceId}>{s.sourceId}: {s.reason}</li>)}</ul>
+            </details>
+          )}
+          {imp.result.assignments.length === 0 && <p className="cap">No polygon assignments in this file. Tracks need an assignment area before they can produce POD.</p>}
+          {imp.result.assignments.map((src, i) => {
+            const a = built[i]!;
+            const pair = imp.pairs[src.sourceId]!;
+            const track = imp.result.tracks.find((t) => t.sourceId === pair.trackId);
+            const inside = track ? shareInsideGrid(track.points) : 1;
+            const blocked = !track
+              ? 'Pair a recorded track first. A planned area alone is not achieved coverage.'
+              : Date.parse(a.availableAt) > cutoff
+                ? 'This track ends after the information cutoff, so it cannot be used in this run.'
+                : inside === 0
+                  ? 'This track lies entirely outside the case map, so it covers no cells.'
+                  : undefined;
+            return (
+              <AssignmentCard key={src.sourceId} a={a} sweepWidthM={pair.sweepWidthM} onSweepWidth={(v) => setPair(src.sourceId, { sweepWidthM: v })} blocked={blocked}>
+                <div className="pairing">
+                  <label className="field inline">Track
+                    <select value={pair.trackId ?? ''} onChange={(e) => setPair(src.sourceId, { trackId: e.target.value || null })}>
+                      <option value="">None</option>
+                      {imp.result.tracks.map((t) => <option key={t.sourceId} value={t.sourceId}>{t.label} ({t.report.quality})</option>)}
+                    </select>
+                  </label>
+                  <label className="field inline">Planned spacing (m)
+                    <input type="number" min={1} step={5} value={pair.plannedSpacingM} onChange={(e) => setPair(src.sourceId, { plannedSpacingM: Number(e.target.value) })} />
+                  </label>
+                </div>
+                {track && inside > 0 && inside < 1 && <p className="cap">{pct(1 - inside, 0)} of this track lies outside the case map and covers nothing.</p>}
+              </AssignmentCard>
+            );
+          })}
+        </>
+      )}
+    </section>
+  );
+}
+
+export function SearchPanel() {
   const [sw, setSw] = useState<Record<string, number>>(() => Object.fromEntries(ASSIGNMENTS.map((a) => [a.id, a.sweepWidthM])));
   return (
     <>
       <p className="lede">Planned and achieved coverage are kept apart. Only the achieved POD from the GPS track updates the map.</p>
-      {availableAssignments().map((a) => {
-        const p = podFor(a, sw[a.id]!);
-        return (
-          <article className="item" key={a.id}>
-            <header><b>{a.id}</b> {a.name} {w.applied.includes(a.id) && <Chip tone="ok">applied</Chip>}</header>
-            <p className="meta">{a.resource} · {a.method} · planned spacing {a.plannedSpacingM} m · track {p.quality}{p.gaps ? ` (${p.gaps} gap${p.gaps > 1 ? 's' : ''})` : ''}</p>
-            <div className="tablewrap">
-              <table className="num">
-                <thead><tr><th /><th scope="col">Coverage</th><th scope="col">POD</th><th scope="col">POS</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">Planned</th><td>{p.planned.summaryCoverage.toFixed(2)}</td><td>{pct(p.planned.summaryPod)}</td><td>{pct(probabilityOfSuccess(w.head, p.planned.pod), 2)}</td></tr>
-                  <tr><th scope="row">Achieved</th><td>{p.achieved.summaryCoverage.toFixed(2)}</td><td>{pct(p.achieved.summaryPod)}</td><td>{pct(probabilityOfSuccess(w.head, p.achieved.pod), 2)}</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <label className="field inline">Effective sweep width (m, exercise value)
-              <input type="number" min={1} step={5} value={sw[a.id]} onChange={(e) => setSw({ ...sw, [a.id]: Number(e.target.value) })} />
-            </label>
-            <button onClick={() => w.actions.setPreview(previewSearch(w.head, a, sw[a.id]!))}>Preview no-find update</button>
-          </article>
-        );
-      })}
+      {availableAssignments().map((a) => (
+        <AssignmentCard key={a.id} a={a} sweepWidthM={sw[a.id]!} onSweepWidth={(v) => setSw({ ...sw, [a.id]: v })} />
+      ))}
       <p className="cap">POD model: exponential sweep width, POD = 1 − e<sup>−C</sup> with coverage C = W·L/A per cell. Applying both searches assumes they are independent.</p>
+      <ImportSection />
     </>
   );
 }

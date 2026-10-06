@@ -25,7 +25,9 @@ import {
   type Distribution,
   type DistanceRingTable,
   type PodSurface,
+  type Point,
 } from '../../../packages/probability-engine/src/index.ts';
+import type { ImportResult } from '../../../packages/importers/src/index.ts';
 import {
   grid,
   IPP,
@@ -203,4 +205,55 @@ export function hpdMask(d: Distribution, level: number): Uint8Array {
     acc += d.values[i]!;
   }
   return acc >= level ? m : new Uint8Array(0);
+}
+
+// ---------------------------------------------------------------------------
+// Imported CalTopo / GPX search effort
+// ---------------------------------------------------------------------------
+
+/** How an imported assignment area is matched to a recorded track, with its planning values. */
+export interface ImportPairing {
+  trackId: string | null;
+  plannedSpacingM: number;
+  sweepWidthM: number;
+}
+
+export const DEFAULT_IMPORT_PAIRING: Omit<ImportPairing, 'trackId'> = { plannedSpacingM: 50, sweepWidthM: 30 };
+
+/** Fraction of a track's points that fall inside the case grid. */
+export function shareInsideGrid(points: readonly Point[]): number {
+  if (!points.length) return 0;
+  const x1 = grid.originX + grid.cols * grid.cellSize;
+  const y1 = grid.originY + grid.rows * grid.cellSize;
+  const inside = points.filter((p) => p.x >= grid.originX && p.x < x1 && p.y >= grid.originY && p.y < y1).length;
+  return inside / points.length;
+}
+
+/**
+ * Turns imported areas and their paired tracks into assignments the POD code
+ * already understands. An area with no track has no achieved effort: its
+ * achieved POD is zero, never its planned POD. Availability is the end of the
+ * recorded track, so effort recorded after the information cutoff is caught by
+ * the same filter that guards clues.
+ */
+export function importedAssignments(imported: { result: ImportResult; pairs: Record<string, ImportPairing> } | null): ExerciseAssignment[] {
+  if (!imported) return [];
+  const tracks = new Map(imported.result.tracks.map((t) => [t.sourceId, t]));
+  return imported.result.assignments.map((a, i) => {
+    const pair = imported.pairs[a.sourceId] ?? { trackId: null, ...DEFAULT_IMPORT_PAIRING };
+    const track = pair.trackId ? tracks.get(pair.trackId) : undefined;
+    const pts = track ? [...track.points] : [];
+    const end = pts.length ? pts[pts.length - 1]!.t : Date.now();
+    return {
+      id: `IMP-${String(i + 1).padStart(2, '0')}`,
+      name: a.label,
+      resource: track ? track.label : 'No track paired',
+      method: `Imported (${imported.result.importerVersion})`,
+      availableAt: new Date(end).toISOString(),
+      area: [...a.area],
+      plannedSpacingM: pair.plannedSpacingM,
+      sweepWidthM: pair.sweepWidthM,
+      track: pts,
+    };
+  });
 }
