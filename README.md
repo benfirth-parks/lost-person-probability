@@ -14,6 +14,8 @@ The authoritative brief is `lost-person-mapper-build.md` in the project files. `
 | `packages/probability-engine` | Distribution invariants, priors (uniform, distance rings with planning-point uncertainty, route corridor, route-weighted, terrain-reachable), scenario mixture, likelihood and no-find updates, cumulative POD, manual adjustments, append-only surface store, evaluation metrics, leakage checks, locked evaluation run |
 | `packages/pod-engine` | Exponential sweep-width POD (planned vs achieved), track assessment, versioned cleaning, gap splitting |
 | `packages/domain` | Dependency-free SHA-256 and canonical JSON for input hashes |
+| `supabase/migrations` | PostGIS schema for the canonical tables, immutability triggers, row-level security, audit log, and the lock/reveal functions |
+| `supabase/tests` | Role-by-role access, leakage and immutability tests |
 | `demo/` | ALPINE-EX-01, an authored training exercise on synthetic terrain, and a single-page workspace built on the engine |
 
 All probability maths is pure and deterministic with no UI dependency.
@@ -26,7 +28,12 @@ npm test            # hand-calculated fixtures + property-based invariant tests
 npm run typecheck
 npm run build:demo  # writes dist/demo.html (self-contained)
 npm run check       # all of the above
+
+# Database (needs a disposable Postgres 16 + PostGIS; CI uses postgis/postgis:16-3.4)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres scripts/db-test.sh
 ```
+
+`supabase/local/auth_shim.sql` stands in for Supabase's roles and `auth.uid()` in local tests only. Clients must select clue columns explicitly: the raw-statement ciphertext column is not granted to them.
 
 ## Data warnings
 
@@ -36,4 +43,4 @@ npm run check       # all of the above
 
 ## Not yet built
 
-Supabase/PostGIS schema and RLS, authentication, Netlify functions, React/MapLibre app shell, importers, offline PWA packaging. See `docs/phase-0-plan.md`.
+Supabase project setup and authentication wiring, Netlify functions (including outcome decryption), React/MapLibre app shell, importers, offline PWA packaging. See `docs/phase-0-plan.md`.
