@@ -63,6 +63,18 @@ describe('CalTopo GeoJSON import', () => {
     expect(r.skipped[2]!.reason).toMatch(/intersect/);
   });
 
+  it('ignores folders and treats an untimed fourth coordinate as no time (shape of a real CalTopo export)', () => {
+    const r = parseCaltopoGeoJson(
+      fc([
+        { geometry: null, id: 'f1', type: 'Feature', properties: { class: 'Folder', title: '7 - Ground Assignments' } },
+        { geometry: { type: 'LineString', coordinates: [[-115.5, 51.1, 0, 0], [-115.4, 51.2, 0, 0]] }, id: 's1', type: 'Feature', properties: { class: 'Shape', folderId: 'f1' } },
+      ]),
+      project,
+    );
+    expect(r.skipped.map((s) => s.sourceId)).toEqual(['s1']);
+    expect(r.skipped[0]!.reason).toMatch(/no timestamps/);
+  });
+
   it('caps labels so a long title cannot carry a narrative', () => {
     const r = parseCaltopoGeoJson(
       fc([{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }, properties: { class: 'Assignment', title: 'x'.repeat(200) } }]),

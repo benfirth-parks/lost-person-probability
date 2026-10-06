@@ -15,8 +15,10 @@ import { assessTrack, type TrackPoint, type TrackReport } from '../../pod-engine
  *
  * The CalTopo field mapping follows CalTopo's documented GeoJSON export
  * (`properties.class`, `title`, `number`, `status`, coordinates with an
- * optional epoch-millisecond fourth element). It has not yet been checked
- * against an export from Parks Canada's own CalTopo account.
+ * optional epoch-millisecond fourth element). A real BYK search-map template
+ * export confirmed the folder, marker and coordinate layout (untimed
+ * coordinates carry 0 as the fourth element); assignment and recorded-track
+ * features have not yet been seen in a real export.
  */
 export const IMPORTER_VERSION = 'caltopo-import@0.1.0';
 
@@ -112,6 +114,9 @@ export function parseCaltopoGeoJson(text: string, project: Project): ImportResul
     const cls = typeof props.class === 'string' ? props.class : '';
     const geom = f?.geometry;
     const type = geom?.type;
+
+    // Folders only group other features and carry no geometry.
+    if (cls === 'Folder' && !geom) return;
 
     if (cls === 'Assignment' || (type === 'Polygon' && cls === '')) {
       if (type !== 'Polygon') {
