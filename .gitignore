@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.local
+.env*
+!.env.example
+# Never commit incident packages or raw data
+data/raw/
+*.incident.json
