@@ -162,6 +162,8 @@ export interface ExerciseAssignment {
   plannedSpacingM: number;
   sweepWidthM: number;
   track: TrackPoint[];
+  /** On-foot parts of an imported track. When present, only these count as search effort. */
+  segments?: TrackPoint[][];
 }
 
 function buffer(line: Point[], w: number): Point[] {

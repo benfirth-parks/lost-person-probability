@@ -30,6 +30,7 @@ describe('imported search effort in the workspace', () => {
     const result = parseCaltopoGeoJson(file(Array.from({ length: 20 }, (_, i) => T + i * 30_000)), local);
     const [a] = importedAssignments({ result, pairs: { area: { trackId: 'trk', ...DEFAULT_IMPORT_PAIRING } } });
     expect(a!.track).toHaveLength(20);
+    expect(a!.segments).toHaveLength(1);
     expect(podFor(a!, 30).achieved.summaryPod).toBeGreaterThan(0);
     expect(shareInsideGrid(a!.track)).toBe(1);
   });

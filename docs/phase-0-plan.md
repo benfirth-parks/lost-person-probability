@@ -44,7 +44,7 @@ Surface storage: start with one compressed Float64 blob per surface in object st
 
 ## CalTopo
 
-The brief rules out direct integration with public map services, so CalTopo is linked by files only. The Search panel imports a CalTopo GeoJSON export or a GPX file in the browser: polygon assignments become planned areas, timestamped lines become tracks, and the planner pairs each area with its track. An area with no track has zero achieved POD, and a track that ends after the information cutoff cannot be applied. The CalTopo field mapping follows CalTopo's documented export format and still needs checking against a real export from the park's account. Exporting surfaces back to CalTopo is not built; it would need approval to put case data into CalTopo.
+The brief rules out direct integration with public map services, so CalTopo is linked by files only. The Search panel imports a CalTopo GeoJSON export or a GPX file in the browser: polygon assignments become planned areas, timestamped lines become tracks, and the planner pairs each area with its track. An area with no track has zero achieved POD, and a track that ends after the information cutoff cannot be applied. The importer has been checked against four real CalTopo exports (structure only; the files are not in the repo). Ground tracks are split into on-foot, vehicle and stationary parts with versioned thresholds (`track-segment@1`), and only on-foot parts count as search effort. Air assignments and aircraft tracks are shown but cannot update the map until an aerial POD model is approved. Outlines that cross themselves are accepted only when no area is lost. Exporting surfaces back to CalTopo is not built; it would need approval to put case data into CalTopo.
 
 ## Questions only you can answer
 

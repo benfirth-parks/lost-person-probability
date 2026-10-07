@@ -2,10 +2,10 @@ import { Map as MlMap, NavigationControl, ScaleControl, setWorkerUrl, type GeoJS
 import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { useEffect, useRef } from 'react';
-import { cellIndexAt, cleanTrack, splitAtGaps, type Distribution, type Point } from '../../../packages/probability-engine/src/index.ts';
+import { cellIndexAt, type Distribution, type Point } from '../../../packages/probability-engine/src/index.ts';
 import { cliff, creek, grid, IPP, lake, trail, type ExerciseAssignment, type ExerciseClue } from '../../../packages/exercises/alpine-ex-01.ts';
 import { gridCorners, lngLatToLocal, localToLngLat } from '../../lib/georef.ts';
-import { hpdMask } from './model.ts';
+import { hpdMask, searchParts } from './model.ts';
 import { hillshade, probabilityImage } from './raster.ts';
 
 export interface Layers {
@@ -86,7 +86,7 @@ function searchGeo(assignments: ExerciseAssignment[]): Geo {
     type: 'FeatureCollection',
     features: assignments.flatMap((a) => [
       ring(a.area, { id: a.id, kind: 'area' }),
-      ...splitAtGaps(cleanTrack(a.track).points).map((part) => line(part, { id: a.id, kind: 'track' })),
+      ...searchParts(a).map((part) => line(part, { id: a.id, kind: 'track' })),
     ]),
   };
 }

@@ -1,4 +1,4 @@
-import { validatePolygon, type Point, type Polygon } from '../../geospatial/src/grid.ts';
+import { pointInPolygon, validatePolygon, type Point, type Polygon } from '../../geospatial/src/grid.ts';
 import { hashValue } from '../../domain/src/hash.ts';
 import { assessTrack, type TrackPoint, type TrackReport } from '../../pod-engine/src/pod.ts';
 
@@ -19,8 +19,10 @@ import { assessTrack, type TrackPoint, type TrackReport } from '../../pod-engine
  * export confirmed the folder, marker and coordinate layout (untimed
  * coordinates carry 0 as the fourth element). A real incident export
  * confirmed polygon assignments identified by `letter` with `status` and
- * `resourceType`, and timestamped aircraft tracks. A timestamped ground track
- * has not yet been seen in a real export.
+ * `resourceType`, and timestamped aircraft tracks. Further real exports
+ * confirmed timestamped ground tracks (about 5 s sampling) that include
+ * driving and long stops, and hand-drawn outlines with repeated vertices and
+ * small self-crossings, which this importer now handles.
  */
 export const IMPORTER_VERSION = 'caltopo-import@0.1.0';
 
@@ -33,6 +35,8 @@ export interface ImportedAssignment {
   /** CalTopo resource type (GROUND, AIR, ...). Only ground search has an approved POD model. */
   readonly resourceType: string | null;
   readonly area: Polygon;
+  /** The outline crosses itself, but harmlessly: no area is lost at SELF_CROSSING_SAMPLE_M. */
+  readonly selfCrossing: boolean;
   /** Planned area only. Searched coverage comes from tracks, never from this polygon. */
   readonly kind: 'planned_area';
 }
@@ -40,14 +44,98 @@ export interface ImportedAssignment {
 export interface ImportedTrack {
   readonly sourceId: string;
   readonly label: string;
+  /** Raw recorded points, unchanged. */
   readonly points: readonly TrackPoint[];
   readonly report: TrackReport;
   /** Median speed above any ground pace: almost certainly an aircraft track. */
   readonly likelyAircraft: boolean;
+  /** The on-foot parts of the track. Only these count as ground search effort. */
+  readonly segments: readonly (readonly TrackPoint[])[];
+  /** Seconds spent in each movement class, so the planner sees what was removed. */
+  readonly movement: { readonly onFootS: number; readonly vehicleS: number; readonly stationaryS: number };
 }
 
 /** 10 m/s (36 km/h): no ground team sustains this as a median speed. */
 export const AIRCRAFT_MEDIAN_SPEED_MPS = 10;
+
+/**
+ * Movement segmentation (track-segment@1). These are data-cleaning thresholds,
+ * not behavioural statistics: they separate searching on foot from driving and
+ * from a device left standing, whose GPS jitter would otherwise add fake track
+ * length and over-credit coverage. Speed is the straight-line displacement over
+ * a window of about a minute, which averages out jitter.
+ */
+export const TRACK_SEGMENTATION = {
+  version: 'track-segment@1',
+  windowS: 60,
+  /** Below this a device is effectively standing still. */
+  stationaryMps: 0.15,
+  /** Above this the device is in a vehicle (a brisk walk is about 1.5 m/s). */
+  vehicleMps: 3,
+  /** Shorter stops or drives are kept as part of the on-foot track. */
+  minRunS: 60,
+} as const;
+
+type Movement = 'foot' | 'vehicle' | 'stationary';
+
+function classify(points: readonly TrackPoint[]): Movement[] {
+  const { windowS, stationaryMps, vehicleMps } = TRACK_SEGMENTATION;
+  const half = (windowS * 1000) / 2;
+  const out: Movement[] = [];
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < points.length; i++) {
+    const t = points[i]!.t;
+    while (points[lo]!.t < t - half) lo++;
+    while (hi + 1 < points.length && points[hi + 1]!.t <= t + half) hi++;
+    const a = points[lo]!;
+    const b = points[hi]!;
+    const dt = (b.t - a.t) / 1000;
+    const v = dt > 0 ? Math.hypot(b.x - a.x, b.y - a.y) / dt : 0;
+    out.push(v < stationaryMps ? 'stationary' : v > vehicleMps ? 'vehicle' : 'foot');
+  }
+  return out;
+}
+
+/** Splits a track into on-foot segments, dropping sustained driving and standing still. */
+export function segmentTrack(points: readonly TrackPoint[]): { segments: TrackPoint[][]; movement: ImportedTrack['movement'] } {
+  const cls = classify(points);
+  // Runs of one class; short non-foot runs are folded back into foot.
+  const runs: Array<{ kind: Movement; from: number; to: number }> = [];
+  cls.forEach((k, i) => {
+    const last = runs[runs.length - 1];
+    if (last && last.kind === k) last.to = i;
+    else runs.push({ kind: k, from: i, to: i });
+  });
+  const dur = (r: { from: number; to: number }) => (points[Math.min(r.to + 1, points.length - 1)]!.t - points[r.from]!.t) / 1000;
+  for (const r of runs) if (r.kind !== 'foot' && dur(r) < TRACK_SEGMENTATION.minRunS) r.kind = 'foot';
+  // A brief "foot" reading squeezed between a drive and a stop is the window blurring
+  // the change of mode, not walking.
+  runs.forEach((r, i) => {
+    const before = runs[i - 1];
+    const after = runs[i + 1];
+    if (r.kind === 'foot' && before && after && before.kind !== 'foot' && after.kind !== 'foot' && dur(r) < TRACK_SEGMENTATION.minRunS) r.kind = before.kind;
+  });
+
+  const movement = { onFootS: 0, vehicleS: 0, stationaryS: 0 };
+  const segments: TrackPoint[][] = [];
+  let current: TrackPoint[] | null = null;
+  for (const r of runs) {
+    const d = dur(r);
+    if (r.kind === 'foot') {
+      movement.onFootS += d;
+      current ??= [];
+      for (let i = r.from; i <= r.to; i++) current.push(points[i]!);
+    } else {
+      if (r.kind === 'vehicle') movement.vehicleS += d;
+      else movement.stationaryS += d;
+      if (current && current.length > 1) segments.push(current);
+      current = null;
+    }
+  }
+  if (current && current.length > 1) segments.push(current);
+  return { segments, movement };
+}
 
 function medianSpeed(points: readonly TrackPoint[]): number {
   const v: number[] = [];
@@ -61,7 +149,7 @@ function medianSpeed(points: readonly TrackPoint[]): number {
 }
 
 function track(sourceId: string, labelText: string, points: TrackPoint[]): ImportedTrack {
-  return { sourceId, label: labelText, points, report: assessTrack(points), likelyAircraft: medianSpeed(points) > AIRCRAFT_MEDIAN_SPEED_MPS };
+  return { sourceId, label: labelText, points, report: assessTrack(points), likelyAircraft: medianSpeed(points) > AIRCRAFT_MEDIAN_SPEED_MPS, ...segmentTrack(points) };
 }
 
 export interface ImportResult {
@@ -85,11 +173,51 @@ function isEpochMs(v: unknown): v is number {
   return typeof v === 'number' && v > 946_684_800_000 && v < 4_102_444_800_000;
 }
 
+/** Sample spacing used to check whether a self-crossing outline loses any area. */
+export const SELF_CROSSING_SAMPLE_M = 20;
+
+function winding(p: Point, poly: Polygon): number {
+  let w = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % poly.length]!;
+    const side = (b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y);
+    if (a.y <= p.y && b.y > p.y && side > 0) w++;
+    else if (a.y > p.y && b.y <= p.y && side < 0) w--;
+  }
+  return w;
+}
+
+/**
+ * Area (m²) that a self-crossing outline would lose: places the outline wraps
+ * around (non-zero winding) that the even-odd fill used by the grid code
+ * leaves out, where the outline overlaps itself.
+ */
+export function selfOverlapArea(poly: Polygon, step = SELF_CROSSING_SAMPLE_M): number {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of poly) {
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }
+  let lost = 0;
+  for (let y = y0 + step / 2; y < y1; y += step) {
+    for (let x = x0 + step / 2; x < x1; x += step) {
+      const p = { x, y };
+      if (winding(p, poly) !== 0 && !pointInPolygon(p, poly)) lost++;
+    }
+  }
+  return lost * step * step;
+}
+
 function ring(coords: unknown, project: Project): Point[] | null {
   if (!Array.isArray(coords)) return null;
   const pts: Point[] = [];
+  let prev: unknown[] | null = null;
   for (const c of coords) {
     if (!Array.isArray(c) || typeof c[0] !== 'number' || typeof c[1] !== 'number') return null;
+    // CalTopo repeats a vertex where an outline was snapped to a trail. The repeat is a
+    // zero-length edge that reads as a self-crossing, so it is dropped; the shape is unchanged.
+    if (prev && prev[0] === c[0] && prev[1] === c[1]) continue;
+    prev = c;
     pts.push(project(c[0], c[1]));
   }
   // GeoJSON rings repeat the first vertex at the end; the grid code does not.
@@ -153,8 +281,13 @@ export function parseCaltopoGeoJson(text: string, project: Project): ImportResul
       }
       const area = ring(geom.coordinates?.[0], project);
       const errs = area ? validatePolygon(area) : ['polygon coordinates are malformed'];
-      if (!area || errs.length) {
-        skipped.push({ sourceId, reason: `assignment outline is invalid (${errs.join('; ')}); fix it in CalTopo and export again` });
+      // Hand-drawn outlines often loop back on themselves along a trail. That is only a
+      // problem where the loop overlaps the outline and the fill would drop that area.
+      const crossingOnly = errs.length > 0 && errs.every((e) => e.includes('intersect'));
+      const lost = area && crossingOnly ? selfOverlapArea(area) : 0;
+      if (!area || (errs.length && !crossingOnly) || lost > 0) {
+        const why = lost > 0 ? `outline overlaps itself, which would drop about ${Math.round(lost / 100) * 100} m² from the area` : errs.join('; ');
+        skipped.push({ sourceId, reason: `assignment outline is invalid (${why}); fix it in CalTopo and export again` });
         return;
       }
       // CalTopo identifies assignments by letter (A, B, ...) and sometimes a number.
@@ -165,6 +298,7 @@ export function parseCaltopoGeoJson(text: string, project: Project): ImportResul
         status: typeof props.status === 'string' ? props.status : null,
         resourceType: typeof props.resourceType === 'string' ? props.resourceType.toUpperCase() : null,
         area,
+        selfCrossing: crossingOnly,
         kind: 'planned_area',
       });
       return;

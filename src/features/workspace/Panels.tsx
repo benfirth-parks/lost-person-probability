@@ -289,10 +289,13 @@ function ImportSection() {
             const track = imp.result.tracks.find((t) => t.sourceId === pair.trackId);
             const inside = track ? shareInsideGrid(track.points) : 1;
             const aerial = src.resourceType === 'AIR' || Boolean(track?.likelyAircraft);
+            const noFoot = Boolean(track && !track.likelyAircraft && track.segments.length === 0);
             const blocked = aerial
               ? 'Aerial search has no approved POD model yet, so it cannot update the map. It is shown for reference only.'
               : !track
               ? 'Pair a recorded track first. A planned area alone is not achieved coverage.'
+              : noFoot
+              ? 'This track has no time on foot (only driving or standing still), so it covers nothing.'
               : Date.parse(a.availableAt) > cutoff
                 ? 'This track ends after the information cutoff, so it cannot be used in this run.'
                 : inside === 0
@@ -304,7 +307,7 @@ function ImportSection() {
                   <label className="field inline">Track
                     <select value={pair.trackId ?? ''} onChange={(e) => setPair(src.sourceId, { trackId: e.target.value || null })}>
                       <option value="">None</option>
-                      {imp.result.tracks.map((t) => <option key={t.sourceId} value={t.sourceId}>{t.label} ({t.likelyAircraft ? 'aircraft' : t.report.quality})</option>)}
+                      {imp.result.tracks.map((t) => <option key={t.sourceId} value={t.sourceId}>{t.label} ({t.likelyAircraft ? 'aircraft' : `${Math.round(t.movement.onFootS / 60)} min on foot`})</option>)}
                     </select>
                   </label>
                   <label className="field inline">Planned spacing (m)
@@ -312,6 +315,12 @@ function ImportSection() {
                   </label>
                 </div>
                 <p className="cap">CalTopo status {src.status ?? 'unknown'}{src.resourceType ? ` · ${src.resourceType.toLowerCase()}` : ''}{src.status === 'DRAFT' ? '. A draft assignment may never have been searched; rely only on its track.' : ''}</p>
+                {src.selfCrossing && <p className="cap">The outline crosses itself, but no area is lost by it.</p>}
+                {track && !track.likelyAircraft && (track.movement.vehicleS > 0 || track.movement.stationaryS > 0) && (
+                  <p className="cap">
+                    Counted {Math.round(track.movement.onFootS / 60)} min on foot. Left out {Math.round(track.movement.vehicleS / 60)} min in a vehicle and {Math.round(track.movement.stationaryS / 60)} min standing still, where GPS drift would otherwise count as distance searched.
+                  </p>
+                )}
                 {track && inside > 0 && inside < 1 && <p className="cap">{pct(1 - inside, 0)} of this track lies outside the case map and covers nothing.</p>}
               </AssignmentCard>
             );

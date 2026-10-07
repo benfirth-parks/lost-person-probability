@@ -26,6 +26,7 @@ import {
   type DistanceRingTable,
   type PodSurface,
   type Point,
+  type TrackPoint,
 } from '../../../packages/probability-engine/src/index.ts';
 import type { ImportResult } from '../../../packages/importers/src/index.ts';
 import {
@@ -156,10 +157,15 @@ export interface AssignmentPod {
   gaps: number;
 }
 
+/** Track pieces that count as search effort: cleaned and split at gaps, from the on-foot segments when the track was imported. */
+export function searchParts(a: ExerciseAssignment): TrackPoint[][] {
+  return (a.segments ?? [a.track]).flatMap((seg) => splitAtGaps(cleanTrack(seg).points));
+}
+
 export function podFor(a: ExerciseAssignment, sweepWidthM: number): AssignmentPod {
   const planned = plannedPod({ grid, area: a.area, sweepWidthM, sweepWidthSource: 'exercise value', plannedSpacingM: a.plannedSpacingM });
   const report = assessTrack(a.track);
-  const parts = splitAtGaps(cleanTrack(a.track).points);
+  const parts = searchParts(a);
   const achieved = achievedPod({ grid, area: a.area, sweepWidthM, sweepWidthSource: 'exercise value', tracks: parts, clipBufferM: 50 });
   return { planned, achieved, quality: report.quality, gaps: report.gaps.length };
 }
@@ -242,7 +248,8 @@ export function importedAssignments(imported: { result: ImportResult; pairs: Rec
   return imported.result.assignments.map((a, i) => {
     const pair = imported.pairs[a.sourceId] ?? { trackId: null, ...DEFAULT_IMPORT_PAIRING };
     const track = pair.trackId ? tracks.get(pair.trackId) : undefined;
-    const pts = track ? [...track.points] : [];
+    const segments = track ? track.segments.map((seg) => [...seg]) : [];
+    const pts = segments.flat();
     const end = pts.length ? pts[pts.length - 1]!.t : Date.now();
     return {
       id: `IMP-${String(i + 1).padStart(2, '0')}`,
@@ -254,6 +261,7 @@ export function importedAssignments(imported: { result: ImportResult; pairs: Rec
       plannedSpacingM: pair.plannedSpacingM,
       sweepWidthM: pair.sweepWidthM,
       track: pts,
+      segments,
     };
   });
 }
