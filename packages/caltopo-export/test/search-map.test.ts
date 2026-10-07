@@ -73,12 +73,14 @@ describe('buildSearchMap', () => {
     expect(m!.geometry).toEqual({ type: 'Point', coordinates: [-115.8, 51.2, 0, 0] });
   });
 
-  it('titles rings like the examples and records their source', () => {
+  it('titles rings like the examples, with the mode and sources noted once on the planning point', () => {
     const rings = map.features.filter((f) => f.geometry?.type === 'LineString');
     expect(rings.map((f) => f.properties.title)).toEqual(['25% 1 km', '50% 2 km', '75% 4 km', '95% 10 km']);
     const odd = buildSearchMap({ ...INPUT, rings: [{ percent: 50, distanceKm: 3.65 }, { percent: 95, distanceKm: 18.3 }], dispersion: [], segments: undefined });
     expect(odd.features.filter((f) => f.geometry?.type === 'LineString').map((f) => f.properties.title)).toEqual(['50% 3.65 km', '95% 18.3 km']);
-    for (const r of rings) expect(r.properties.description).toMatch(/source: test values.*training\/research mode|training\/research mode.*source: test values/s);
+    for (const r of rings) expect(r.properties.description).toBeUndefined();
+    const [pp] = map.features.filter((f) => f.properties.class === 'Marker');
+    expect(pp!.properties.description).toMatch(/training\/research mode.*Rings: test values.*Dispersion around 90° true: test values/s);
   });
 
   it('cuts 3 ring bands × 8 sectors = 24 draft ground segments out to the 75% ring', () => {

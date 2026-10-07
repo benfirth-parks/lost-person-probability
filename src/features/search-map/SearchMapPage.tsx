@@ -345,7 +345,7 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
               <p className="meta">{counts.rings} rings · {counts.wedges} wedges · {counts.segments} segments · {GENERATOR_VERSION}</p>
               {table.kind === 'exercise' && !f.manual && <p className="sm-exercise">Exercise values. Load a behaviour table from a real source before using these rings for anything but training.</p>}
               <button className="primary" onClick={download}>Download CalTopo file</button>
-              <p className="cap">In CalTopo, use Import on the map and choose this file. Every feature notes that it was generated in training/research mode and names its source.</p>
+              <p className="cap">In CalTopo, use Import on the map and choose this file. Rings, wedges and segments carry titles only; the IPP marker holds one note with the training mode and the sources.</p>
             </>
           ) : (
             <div className="sm-todo" aria-live="polite">

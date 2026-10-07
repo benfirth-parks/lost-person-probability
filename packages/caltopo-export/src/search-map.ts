@@ -203,13 +203,22 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     properties: { class: 'Folder', title, visible: FOLDER_VISIBLE.has(title), labelVisible: true },
   }));
   const pp = input.planningPoint;
-  const note = (extra: string) => `${MODE_NOTE} ${extra} (${GENERATOR_VERSION})`;
+  // One note for the whole map, on the planning point; rings, wedges and segments carry no text of their own.
+  const provenance = [
+    MODE_NOTE,
+    `Case: ${input.label}.`,
+    `Rings: ${input.ringSource}`,
+    input.dispersion?.length ? `Dispersion around ${input.travelBearingDeg}° true: ${input.dispersionSource}` : '',
+    `(${GENERATOR_VERSION})`,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   features.push({
     type: 'Feature',
     id: idFor(seed, 'planning-point'),
     geometry: { type: 'Point', coordinates: coord(pp) },
-    properties: { class: 'Marker', title: pp.kind, description: note(`Planning point for the rings below. Case: ${input.label}.${input.subjectCategory ? ` Subject category: ${input.subjectCategory}.` : ''}`), 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
+    properties: { class: 'Marker', title: pp.kind, description: provenance, 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
   });
 
   for (const r of input.rings) {
@@ -217,7 +226,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
       type: 'Feature',
       id: idFor(seed, `ring:${r.percent}`),
       geometry: { type: 'LineString', coordinates: ringLine(pp, r.distanceKm * 1000) },
-      properties: { class: 'Shape', title: `${r.percent}% ${fmtKm(r.distanceKm)}`, description: note(`Ring distance source: ${input.ringSource}.`), ...RING_STYLE, folderId: folderIds['3 - Range rings and Dispersion angles'] },
+      properties: { class: 'Shape', title: `${r.percent}% ${fmtKm(r.distanceKm)}`, ...RING_STYLE, folderId: folderIds['3 - Range rings and Dispersion angles'] },
     });
   }
 
@@ -227,7 +236,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
       type: 'Feature',
       id: idFor(seed, `wedge:${d.percent}`),
       geometry: { type: 'Polygon', coordinates: [wedgePolygon(pp, input.travelBearingDeg!, d.angleDeg, ring.distanceKm * 1000)] },
-      properties: { class: 'Shape', title: `${d.percent}% dispersion ${d.angleDeg}°`, description: note(`Dispersion angle source: ${input.dispersionSource}. Centred on a direction of travel of ${input.travelBearingDeg}°.`), ...WEDGE_STYLE, folderId: folderIds['3 - Range rings and Dispersion angles'] },
+      properties: { class: 'Shape', title: `${d.percent}% dispersion ${d.angleDeg}°`, ...WEDGE_STYLE, folderId: folderIds['3 - Range rings and Dispersion angles'] },
     });
   }
 
@@ -249,7 +258,6 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
             letter: name,
             status: 'DRAFT',
             resourceType: 'GROUND',
-            description: note(`First-cut segment: ring band ${b + 1} (to the ${r.percent}% ring), ${sectorName(s, sectors)} sector. Adjust to terrain before assigning.`),
             ...SEGMENT_STYLE,
             folderId: folderIds['8 - Unassigned Segments'],
           },
