@@ -5,6 +5,7 @@ import { IncidentsPage } from '../features/incidents/IncidentsPage.tsx';
 import { clock } from '../features/workspace/format.ts';
 import { useWorkspace, useWorkspaceState, WorkspaceContext, type Role } from '../features/workspace/useWorkspace.ts';
 import { WorkspacePage } from '../features/workspace/WorkspacePage.tsx';
+import { SearchMapPage } from '../features/search-map/SearchMapPage.tsx';
 import { AdminPage } from './AdminPage.tsx';
 
 function Toast() {
@@ -38,6 +39,7 @@ export function App() {
             <nav className="nav" aria-label="Main">
               <NavLink to="/incidents">Cases</NavLink>
               <NavLink to={`/incident/${CASE_CODE}/map`}>Map workspace</NavLink>
+              <NavLink to="/tools/search-map">Search map</NavLink>
               <NavLink to="/admin">Administration</NavLink>
             </nav>
             <div className="facts">
@@ -58,6 +60,7 @@ export function App() {
               <Route path="/" element={<Navigate to={`/incident/${CASE_CODE}/map`} replace />} />
               <Route path="/incidents" element={<IncidentsPage />} />
               <Route path="/incident/:id/map" element={<WorkspacePage />} />
+              <Route path="/tools/search-map" element={<SearchMapPage />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<p className="lede">Page not found.</p>} />
             </Routes>
