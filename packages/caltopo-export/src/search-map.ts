@@ -27,6 +27,24 @@ export const TEMPLATE_FOLDERS = [
   '8 - Unassigned Segments',
 ] as const;
 
+/**
+ * Folder ids from the BYK template. Real maps built from the template keep them,
+ * so features imported with these ids land in the template's own folders.
+ */
+export const TEMPLATE_FOLDER_IDS: Record<(typeof TEMPLATE_FOLDERS)[number], string> = {
+  '1 - Important Points': 'bfae8b57-66c1-4f19-b300-fa67d2dc0cf1',
+  '2 - Clues': '49a8bc63-d833-4caa-a4b1-34a287dde302',
+  '3 - Range rings and Dispersion angles': '296a4f7d-82c4-48b7-944d-d3fd610e4aeb',
+  '4 - Op 1 Air Tracks': '9dbbeff9-63bd-4eea-84d6-007fcdb1300d',
+  '5 - OP 1 Ground Tracks': '2105ac92-0106-4225-a9fb-ee132565047a',
+  '6 - Air Assignments': 'dab108f2-73da-4e1c-849f-f42aef09155b',
+  '7 - Ground Assignments': '233a79cd-fd46-4a51-a1a1-ecc51605a192',
+  '8 - Unassigned Segments': '458ef425-d0f7-45f3-9712-d1d1008d9f5e',
+};
+
+/** The template opens with these folders collapsed out of view; the assignment folders stay shown. */
+const FOLDER_VISIBLE = new Set(['6 - Air Assignments', '7 - Ground Assignments', '8 - Unassigned Segments']);
+
 export interface LngLat {
   lng: number;
   lat: number;
@@ -83,7 +101,8 @@ export function distanceM(a: LngLat, b: LngLat): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
-const coord = (p: LngLat) => [round(p.lng), round(p.lat)];
+/** CalTopo's own 4-tuple: longitude, latitude, elevation and time, the last two 0 when unknown. */
+const coord = (p: LngLat) => [round(p.lng), round(p.lat), 0, 0];
 
 /** Points along an arc from `fromDeg` clockwise to `toDeg`, at most STEP_DEG apart, both ends included. */
 function arc(centre: LngLat, radiusM: number, fromDeg: number, toDeg: number): number[][] {
@@ -172,12 +191,12 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
   const errs = validateSearchMapInput(input);
   if (errs.length) throw new Error(errs.join('; '));
   const seed = hashValue(input);
-  const folderIds = Object.fromEntries(TEMPLATE_FOLDERS.map((t) => [t, idFor(seed, `folder:${t}`)]));
+  const folderIds = TEMPLATE_FOLDER_IDS;
   const features: CaltopoFeature[] = TEMPLATE_FOLDERS.map((title) => ({
     type: 'Feature',
-    id: folderIds[title]!,
+    id: folderIds[title],
     geometry: null,
-    properties: { class: 'Folder', title, visible: true, labelVisible: true },
+    properties: { class: 'Folder', title, visible: FOLDER_VISIBLE.has(title), labelVisible: true },
   }));
   const pp = input.planningPoint;
   const note = (extra: string) => `${MODE_NOTE} ${extra} (${GENERATOR_VERSION})`;
@@ -186,7 +205,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     type: 'Feature',
     id: idFor(seed, 'planning-point'),
     geometry: { type: 'Point', coordinates: coord(pp) },
-    properties: { class: 'Marker', title: `${pp.kind} ${input.label}`, description: note('Planning point for the rings below.'), 'marker-symbol': 'point', 'marker-color': '#FF0000', 'marker-size': '1', folderId: folderIds['1 - Important Points'] },
+    properties: { class: 'Marker', title: pp.kind, description: note(`Planning point for the rings below. Case: ${input.label}.`), 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
   });
 
   for (const r of input.rings) {

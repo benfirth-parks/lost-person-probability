@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCaltopoGeoJson } from '../../importers/src/index.ts';
-import { buildSearchMap, destination, distanceM, ringLine, searchMapFileName, TEMPLATE_FOLDERS, validateSearchMapInput, wedgePolygon, type SearchMapInput } from '../src/index.ts';
+import { buildSearchMap, destination, distanceM, ringLine, searchMapFileName, TEMPLATE_FOLDER_IDS, TEMPLATE_FOLDERS, validateSearchMapInput, wedgePolygon, type SearchMapInput } from '../src/index.ts';
 
 const IPP = { lng: -115.8, lat: 51.2 };
 // Round test values, not behavioural statistics.
@@ -63,6 +63,14 @@ describe('buildSearchMap', () => {
     const ids = new Set(folders.map((f) => f.id));
     for (const f of map.features) if (f.properties.class !== 'Folder') expect(ids.has(f.properties.folderId as string)).toBe(true);
     expect(new Set(map.features.map((f) => f.id)).size).toBe(map.features.length);
+  });
+
+  it("keeps the template's folder ids and marks the planning point as the template does", () => {
+    expect(byClass('Folder').map((f) => f.id)).toEqual(TEMPLATE_FOLDERS.map((t) => TEMPLATE_FOLDER_IDS[t]));
+    expect(TEMPLATE_FOLDER_IDS['1 - Important Points']).toBe('bfae8b57-66c1-4f19-b300-fa67d2dc0cf1');
+    const [m] = byClass('Marker');
+    expect(m!.properties).toMatchObject({ title: 'IPP', 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: TEMPLATE_FOLDER_IDS['1 - Important Points'] });
+    expect(m!.geometry).toEqual({ type: 'Point', coordinates: [-115.8, 51.2, 0, 0] });
   });
 
   it('titles rings like the examples and records their source', () => {
