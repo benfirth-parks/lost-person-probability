@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { categories, LPB_CATEGORIES, LPB_TABLE, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
 import {
   buildSearchMap,
@@ -15,6 +15,7 @@ import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/
 import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
 import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
+import { insideCoverage, loadRidgeIndex, loadRidgePolygons, type RidgePolygons } from './ridges.ts';
 import { INITIAL_POD_STATE, SegmentPodPanel, segmentPodsFor, type PodState } from './SegmentPodPanel.tsx';
 
 /**
@@ -46,8 +47,9 @@ interface FormState {
   ringSource: string;
   dispersion: Row[];
   dispersionSource: string;
+  /** "ridges" for terrain area segments, "0" for none, or "4"–"16" ring sectors. */
   sectors: string;
-  /** Ring bands that get sector segments, by the outer ring's percent. */
+  /** Ring bands that get area segments, by the outer ring's percent. */
   segRings: string[];
   /** Trail corridor half-width (m), piece length (km) and the ring bands they cover. */
   trailWidth: string;
@@ -74,14 +76,14 @@ const INITIAL: FormState = {
   ringSource: '',
   dispersion: emptyRows(),
   dispersionSource: '',
-  sectors: '8',
+  sectors: 'ridges',
   segRings: ['25', '50', '75'],
   trailWidth: String(DEFAULT_TRAIL_OPTIONS.halfWidthM),
   trailPiece: String(DEFAULT_TRAIL_OPTIONS.pieceLengthM / 1000),
   trailRings: ['25', '50', '75'],
 };
 
-function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null): { input: SearchMapInput; notes: string[] } {
+function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null, ridges: RidgePolygons | null = null): { input: SearchMapInput; notes: string[] } {
   const notes: string[] = [];
   const parsed = parseCoordinate(f.coord);
   const bearing = f.bearing.trim() === '' ? undefined : num(f.bearing);
@@ -118,7 +120,8 @@ function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null):
       ringSource,
       dispersion,
       dispersionSource,
-      segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), inRings: f.segRings.map(num) },
+      segments: f.sectors === '0' || f.sectors === 'ridges' ? undefined : { sectors: Number(f.sectors), inRings: f.segRings.map(num) },
+      areas: f.sectors === 'ridges' && ridges ? { polygons: ridges.polygons, inRings: f.segRings.map(num), source: ridges.source } : undefined,
       trails: trails?.lines.length
         ? { lines: trails.lines, halfWidthM: num(f.trailWidth), pieceLengthM: num(f.trailPiece) * 1000, inRings: f.trailRings.map(num) }
         : undefined,
@@ -228,9 +231,44 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [trails, setTrails] = useState<TrailFile | null>(null);
   const [trailProblem, setTrailProblem] = useState('');
   const [podState, setPodState] = useState<PodState>(INITIAL_POD_STATE);
+  const [ridges, setRidges] = useState<RidgePolygons | null>(null);
+  const [ridgeNote, setRidgeNote] = useState('');
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
-  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails), [f, table, trails]);
+  // Where to load ridge segments for: the planning point and the outermost ticked ring.
+  const ridgeNeed = useMemo(() => {
+    if (f.sectors !== 'ridges') return null;
+    const pre = toInput(f, table, trails).input;
+    const outer = Math.max(0, ...pre.rings.filter((r) => f.segRings.includes(String(r.percent))).map((r) => r.distanceKm * 1000));
+    const { lat, lng } = pre.planningPoint;
+    return outer > 0 && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, radiusM: outer } : null;
+  }, [f, table, trails]);
+  const ridgeKey = ridgeNeed && `${ridgeNeed.lat},${ridgeNeed.lng},${ridgeNeed.radiusM}`;
+  useEffect(() => {
+    setRidges(null);
+    if (!ridgeNeed) {
+      setRidgeNote(f.sectors === 'ridges' ? 'Enter the planning point and rings, and tick a band, to load the ridge segments.' : '');
+      return;
+    }
+    let live = true;
+    setRidgeNote('Loading ridge segments…');
+    (async () => {
+      try {
+        const index = await loadRidgeIndex();
+        if (!insideCoverage(index, ridgeNeed.lat, ridgeNeed.lng)) throw new Error('the planning point is outside the mountain parks the ridge data covers; choose ring sectors instead');
+        const r = await loadRidgePolygons(index, ridgeNeed.lat, ridgeNeed.lng, ridgeNeed.radiusM);
+        if (!live) return;
+        setRidges(r);
+        setRidgeNote('');
+      } catch (e) {
+        if (live) setRidgeNote(`No ridge segments: ${(e as Error).message}.`);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [ridgeKey, f.sectors]);
+  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails, ridges), [f, table, trails, ridges]);
   // Segment names come from the map without PODs; PODs never change which segments exist.
   const segmentNames = useMemo(() => {
     if (validateSearchMapInput(baseInput).length) return [];
@@ -386,18 +424,29 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
 
           <h3>5 · Unassigned segments</h3>
           <div className="sm-row">
-            <label className="field" htmlFor="sm-sectors">Sectors
+            <label className="field" htmlFor="sm-sectors">Area segments
               <select id="sm-sectors" value={f.sectors} onChange={(e) => set('sectors', e.target.value)}>
+                <option value="ridges">Ridges and creeks</option>
                 <option value="0">None</option>
-                <option value="4">4</option>
-                <option value="8">8</option>
-                <option value="12">12</option>
-                <option value="16">16</option>
+                <option value="4">4 ring sectors</option>
+                <option value="8">8 ring sectors</option>
+                <option value="12">12 ring sectors</option>
+                <option value="16">16 ring sectors</option>
               </select>
             </label>
           </div>
           <RingBands id="sm-seg-rings" chosen={f.segRings} onChange={(v) => set('segRings', v)} disabled={f.sectors === '0'} />
-          <p className="cap">Segments are ring bands cut into equal sectors around the planning point, in the bands you tick. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+          {f.sectors === 'ridges' ? (
+            <>
+              <p className="cap">
+                Areas A-1, A-2 and so on follow ridges, creeks and lakes, worked out from NRCan elevation data, and are cut only at the edges of the bands you tick. Nearest the planning
+                point comes first. The terrain data is part of this site and is read here; the planning point is not sent anywhere. Covers the Rocky Mountain parks and Kananaskis.
+              </p>
+              {ridgeNote && <p className="cap" role="status">{ridgeNote}</p>}
+            </>
+          ) : (
+            <p className="cap">Segments are ring bands cut into equal sectors around the planning point, in the bands you tick. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+          )}
 
           <h3>Trail segments</h3>
           <label className="field" htmlFor="sm-trails">Trails file (GPX, or GeoJSON such as a CalTopo export of the trail lines)

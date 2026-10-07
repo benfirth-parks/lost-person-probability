@@ -242,7 +242,7 @@ export function trailCorridors(origin: LngLat, trails: readonly (readonly LngLat
 }
 
 /** Bands sorted outwards, with touching or overlapping bands joined. */
-function mergeBands(bands: readonly { innerM: number; outerM: number }[]): { innerM: number; outerM: number }[] {
+export function mergeBands(bands: readonly { innerM: number; outerM: number }[]): { innerM: number; outerM: number }[] {
   const out: { innerM: number; outerM: number }[] = [];
   for (const b of [...bands].sort((p, q) => p.innerM - q.innerM)) {
     const last = out[out.length - 1];
