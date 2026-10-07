@@ -152,8 +152,8 @@ export function validateSearchMapInput(input: SearchMapInput): string[] {
   // A case label is a place and date, never a person: refuse two capitalised words in a row or digits that look like a phone number.
   if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(input.label) && !/(Lake|Canyon|Creek|River|Mountain|Mount|Peak|Pass|Valley|Trail|Glacier|Falls|Ridge|Park)\b/.test(input.label))
     errs.push('label looks like a person\'s name; use a place and date instead');
-  if (input.subjectCategory !== undefined && !/^[a-z][a-z -]{0,29}$/.test(input.subjectCategory))
-    errs.push('subject category must be a short lower-case activity word such as hiker');
+  if (input.subjectCategory !== undefined && !/^[a-z0-9][a-z0-9 ,()/-]{0,39}$/.test(input.subjectCategory))
+    errs.push('subject category must be a short lower-case name such as hiker');
   if (/\d{3}[\s.-]?\d{3}[\s.-]?\d{4}/.test(input.label)) errs.push('label looks like it contains a phone number');
   if (!input.ringSource.trim()) errs.push('ring source is required: name the table and subject category the distances come from');
   if (!input.rings.length) errs.push('at least one range ring is required');

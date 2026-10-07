@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { categories, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
 import {
   buildSearchMap,
   distanceM,
@@ -8,21 +9,16 @@ import {
   type SearchMap,
   type SearchMapInput,
 } from '../../../packages/caltopo-export/src/index.ts';
-import {
-  AI_READER_NOT_APPROVED,
-  LOCAL_READER,
-  readIncident,
-  redactIncidentText,
-  SUBJECT_CATEGORIES,
-  type IntakeFields,
-  type IntakeReader,
-} from '../../../packages/intake/src/index.ts';
+import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/coords.ts';
+import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
+import { BehaviourTablePanel, loadSavedTable } from './BehaviourTablePanel.tsx';
+import { Intake } from './Intake.tsx';
 
 /**
- * Builds a CalTopo search map (range rings, dispersion wedges, first-cut
- * segments) from initial details typed into this form. Everything runs in the
- * browser: no details are sent anywhere, and the only output is the file the
- * planner downloads.
+ * Builds a CalTopo search map from incident details: range rings and dispersion
+ * wedges looked up in a behaviour table for the subject category and terrain,
+ * and first-cut segments. Everything runs in the browser; the only output is
+ * the file the planner downloads.
  */
 
 interface Row {
@@ -30,33 +26,19 @@ interface Row {
   value: string;
 }
 
-const PERCENTS = ['25', '50', '75', '95'];
+const PERCENTS = PERCENTILES.map(String);
 const emptyRows = (): Row[] => PERCENTS.map((percent) => ({ percent, value: '' }));
 const num = (s: string) => (s.trim() === '' ? NaN : Number(s));
 
-function toInput(f: FormState): SearchMapInput {
-  const rings = f.rings.filter((r) => r.value.trim() !== '').map((r) => ({ percent: num(r.percent), distanceKm: num(r.value) }));
-  const dispersion = f.dispersion.filter((r) => r.value.trim() !== '').map((r) => ({ percent: num(r.percent), angleDeg: num(r.value) }));
-  return {
-    label: f.label,
-    planningPoint: { lat: num(f.lat), lng: num(f.lng), kind: f.kind },
-    travelBearingDeg: f.bearing.trim() === '' ? undefined : num(f.bearing),
-    subjectCategory: f.category || undefined,
-    rings,
-    ringSource: f.ringSource,
-    dispersion,
-    dispersionSource: f.dispersionSource,
-    segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
-  };
-}
-
 interface FormState {
   label: string;
-  lat: string;
-  lng: string;
+  coord: string;
   kind: 'IPP' | 'LKP' | 'PLS';
   bearing: string;
   category: string;
+  terrain: string;
+  /** Rings and angles typed by hand instead of looked up. */
+  manual: boolean;
   rings: Row[];
   ringSource: string;
   dispersion: Row[];
@@ -67,11 +49,12 @@ interface FormState {
 
 const INITIAL: FormState = {
   label: '',
-  lat: '',
-  lng: '',
+  coord: '',
   kind: 'IPP',
   bearing: '',
   category: '',
+  terrain: '',
+  manual: false,
   rings: emptyRows(),
   ringSource: '',
   dispersion: emptyRows(),
@@ -79,6 +62,48 @@ const INITIAL: FormState = {
   sectors: '8',
   outTo: '75',
 };
+
+function toInput(f: FormState, table: BehaviourTable): { input: SearchMapInput; notes: string[] } {
+  const notes: string[] = [];
+  const parsed = parseCoordinate(f.coord);
+  const bearing = f.bearing.trim() === '' ? undefined : num(f.bearing);
+  let rings: SearchMapInput['rings'] = [];
+  let ringSource = '';
+  let dispersion: NonNullable<SearchMapInput['dispersion']> = [];
+  let dispersionSource = '';
+  if (f.manual) {
+    rings = f.rings.filter((r) => r.value.trim() !== '').map((r) => ({ percent: num(r.percent), distanceKm: num(r.value) }));
+    ringSource = f.ringSource;
+    dispersion = f.dispersion.filter((r) => r.value.trim() !== '').map((r) => ({ percent: num(r.percent), angleDeg: num(r.value) }));
+    dispersionSource = f.dispersionSource;
+  } else if (f.category && f.terrain) {
+    const hit = lookupBehaviour(table, f.category, f.terrain);
+    if (hit) {
+      rings = PERCENTILES.map((p) => ({ percent: p, distanceKm: hit.entry.ringsKm[p] }));
+      ringSource = hit.citation;
+      if (hit.terrainFallback) notes.push(`No ${f.terrain} row for ${f.category}; using its "any" terrain row.`);
+      if (hit.entry.dispersionDeg && bearing !== undefined) {
+        dispersion = PERCENTILES.map((p) => ({ percent: p, angleDeg: hit.entry.dispersionDeg![p] }));
+        dispersionSource = hit.citation;
+      } else if (hit.entry.dispersionDeg) notes.push('Add a direction of travel to draw the dispersion wedges.');
+      else notes.push('This table row has no dispersion angles, so no wedges are drawn.');
+    }
+  }
+  return {
+    notes,
+    input: {
+      label: f.label,
+      planningPoint: { lat: parsed.ok ? parsed.lat : NaN, lng: parsed.ok ? parsed.lng : NaN, kind: f.kind },
+      travelBearingDeg: bearing,
+      subjectCategory: f.category || undefined,
+      rings,
+      ringSource,
+      dispersion,
+      dispersionSource,
+      segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
+    },
+  };
+}
 
 /** Plan view in metres around the planning point, for a quick check before download. */
 function Preview({ map, input }: { map: SearchMap; input: SearchMapInput }) {
@@ -108,82 +133,6 @@ function Preview({ map, input }: { map: SearchMap; input: SearchMapInput }) {
   );
 }
 
-const READERS: IntakeReader[] = [LOCAL_READER, AI_READER_NOT_APPROVED];
-
-const FIELD_LABEL: Record<keyof IntakeFields, string> = {
-  lat: 'Latitude',
-  lng: 'Longitude',
-  pointKind: 'Point',
-  travelBearingDeg: 'Direction of travel',
-  subjectCategory: 'Subject category',
-};
-
-/**
- * Plain-language intake. The description is cleaned here before any reader sees it,
- * and the reader's answer only becomes form values when the planner says so.
- * The description itself is never stored or put in the file.
- */
-function Intake({ onUse }: { onUse: (fields: IntakeFields) => void }) {
-  const [text, setText] = useState('');
-  const [readerName, setReaderName] = useState(LOCAL_READER.name);
-  const [result, setResult] = useState<{ fields: IntakeFields; discarded: string[] } | null>(null);
-  const [error, setError] = useState('');
-  const reader = READERS.find((r) => r.name === readerName)!;
-  const cleaned = useMemo(() => redactIncidentText(text), [text]);
-  const removedCount = Object.values(cleaned.removed).reduce((a, b) => a + b, 0);
-
-  async function read() {
-    setError('');
-    setResult(null);
-    try {
-      setResult(await readIncident(text, reader));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  const entries = result ? (Object.entries(result.fields) as Array<[keyof IntakeFields, unknown]>) : [];
-  return (
-    <div className="sm-intake">
-      <h3>Describe the incident</h3>
-      <label className="field">What happened, in your own words. Leave out names and health details; anything that looks like them is removed before it is read.
-        <textarea rows={4} value={text} onChange={(e) => { setText(e.target.value); setResult(null); }} />
-      </label>
-      <div className="sm-row">
-        <label className="field">Read by
-          <select value={readerName} onChange={(e) => { setReaderName(e.target.value); setResult(null); }}>
-            {READERS.map((r) => <option key={r.name} value={r.name} disabled={!r.enabled}>{r.name}</option>)}
-          </select>
-        </label>
-        <button type="button" onClick={read} disabled={!text.trim() || !reader.enabled}>Read description</button>
-      </div>
-      {text.trim() && (
-        <details className="sm-sent">
-          <summary>What the reader sees{removedCount ? ` (${removedCount} removed)` : ''}</summary>
-          <p>{cleaned.text}</p>
-          <p className="cap">Removed: {cleaned.removed.name} name-like, {cleaned.removed.phone + cleaned.removed.email} contact, {cleaned.removed.health} health. Only the planning point, its kind, the direction of travel and an activity category can come back.</p>
-        </details>
-      )}
-      {error && <p className="cap" role="alert">{error}</p>}
-      {result && (
-        <div className="sm-proposal" aria-live="polite">
-          {entries.length ? (
-            <>
-              <b>Found:</b>
-              <ul>{entries.map(([k, v]) => <li key={k}>{FIELD_LABEL[k]}: {String(v)}{k === 'travelBearingDeg' ? '°' : ''}</li>)}</ul>
-              <button type="button" className="primary" onClick={() => onUse(result.fields)}>Use these in the form</button>
-            </>
-          ) : (
-            <p>Nothing usable found. Fill the form below.</p>
-          )}
-          {result.discarded.length > 0 && <p className="cap">Ignored: {result.discarded.join(', ')}.</p>}
-          <p className="cap">Ring distances and dispersion angles never come from the description. Enter them below with their source.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function RowsTable({ rows, onChange, unit, label }: { rows: Row[]; onChange: (rows: Row[]) => void; unit: string; label: string }) {
   return (
     <table className="num sm-rows">
@@ -209,17 +158,72 @@ function RowsTable({ rows, onChange, unit, label }: { rows: Row[]; onChange: (ro
   );
 }
 
-export function SearchMapPage() {
+/** The looked-up rings and angles, read-only, with where they came from. */
+function LookedUp({ input }: { input: SearchMapInput }) {
+  const angle = (p: number) => input.dispersion?.find((d) => d.percent === p)?.angleDeg;
+  return (
+    <>
+      <table className="num sm-rows">
+        <thead>
+          <tr><th scope="col">Percent of finds</th><th scope="col">Ring (km)</th><th scope="col">Dispersion (°)</th></tr>
+        </thead>
+        <tbody>
+          {input.rings.map((r) => (
+            <tr key={r.percent}>
+              <th scope="row">{r.percent}%</th>
+              <td>{r.distanceKm}</td>
+              <td>{angle(r.percent) ?? '–'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="cap">{input.ringSource}</p>
+    </>
+  );
+}
+
+export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [f, setF] = useState<FormState>(INITIAL);
+  const [table, setTable] = useState<BehaviourTable>(loadSavedTable);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
-  const input = useMemo(() => toInput(f), [f]);
-  const errors = useMemo(() => validateSearchMapInput(input), [input]);
+  const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
+  const { input, notes } = useMemo(() => toInput(f, table), [f, table]);
+  const errors = useMemo(() => {
+    const e = validateSearchMapInput(input);
+    if (!f.manual && !input.rings.length) e.unshift(f.category && f.terrain ? `the table has no row for ${f.category}` : 'choose a subject category and terrain to look up the rings');
+    return e.filter((x) => !(x.startsWith('ring source') && !f.manual && !input.rings.length));
+  }, [input, f.manual, f.category, f.terrain]);
   const map = useMemo(() => (errors.length ? null : buildSearchMap(input)), [errors, input]);
   const counts = map && {
     rings: map.features.filter((x) => x.geometry?.type === 'LineString').length,
     wedges: map.features.filter((x) => x.geometry?.type === 'Polygon' && x.properties.class === 'Shape').length,
     segments: map.features.filter((x) => x.properties.class === 'Assignment').length,
   };
+  const cats = categories(table);
+  const terrs = terrains(table, f.category || undefined).filter((t) => t !== 'any');
+
+  function applyIntake(x: IntakeFields) {
+    setF((cur) => ({
+      ...cur,
+      coord: x.lat !== undefined && x.lng !== undefined ? formatLatLng(x.lat, x.lng) : cur.coord,
+      kind: x.pointKind ?? cur.kind,
+      bearing: x.travelBearingDeg !== undefined ? String(x.travelBearingDeg) : cur.bearing,
+      category: x.subjectCategory && cats.includes(x.subjectCategory) ? x.subjectCategory : cur.category,
+      terrain: x.terrain ?? cur.terrain,
+    }));
+  }
+
+  function switchToManual() {
+    // Start the hand-entry rows from what was looked up, so the planner edits rather than retypes.
+    setF((cur) => ({
+      ...cur,
+      manual: true,
+      rings: PERCENTS.map((p) => ({ percent: p, value: String(input.rings.find((r) => String(r.percent) === p)?.distanceKm ?? '') })),
+      ringSource: input.ringSource,
+      dispersion: PERCENTS.map((p) => ({ percent: p, value: String(input.dispersion?.find((r) => String(r.percent) === p)?.angleDeg ?? '') })),
+      dispersionSource: input.dispersionSource ?? '',
+    }));
+  }
 
   function download() {
     if (!map) return;
@@ -228,75 +232,87 @@ export function SearchMapPage() {
     a.href = URL.createObjectURL(blob);
     a.download = searchMapFileName(input);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
   }
 
   return (
     <section className="page">
       <h2>Search map for CalTopo</h2>
       <p className="lede">
-        Builds range rings, dispersion wedges and first-cut segments in the BYK template folders, as a file to import into CalTopo. It runs in this browser and sends nothing anywhere. Ring
-        distances and dispersion angles must come from a source you name; the tool has none of its own.
+        Builds range rings, dispersion wedges and first-cut segments in the BYK template folders, as a file to import into CalTopo. Rings and angles come from the behaviour
+        table for the subject category and terrain. It runs in this browser and sends nothing anywhere.
       </p>
       <div className="sm-grid">
         <div className="sm-form">
-          <Intake
-            onUse={(x) =>
-              setF((cur) => ({
-                ...cur,
-                lat: x.lat !== undefined ? String(x.lat) : cur.lat,
-                lng: x.lng !== undefined ? String(x.lng) : cur.lng,
-                kind: x.pointKind ?? cur.kind,
-                bearing: x.travelBearingDeg !== undefined ? String(x.travelBearingDeg) : cur.bearing,
-                category: x.subjectCategory ?? cur.category,
-              }))
-            }
-          />
-          <label className="field">Case label (place and date, no names)
-            <input value={f.label} maxLength={40} placeholder="e.g. Aurora Lake 2026-07-18" onChange={(e) => set('label', e.target.value)} />
+          <Intake onUse={applyIntake} readers={readers} />
+
+          <h3>2 · Planning point</h3>
+          <label className="field" htmlFor="sm-coord">Coordinates (paste decimal degrees, degrees and minutes, or UTM)
+            <input id="sm-coord" value={f.coord} placeholder="51.2034, -115.6120  or  11U 594123 5677123" autoComplete="off" spellCheck={false} onChange={(e) => set('coord', e.target.value)} />
           </label>
+          {coord && (
+            <p className={`cap ${coord.ok ? '' : 'sm-doc-bad'}`} aria-live="polite">
+              {coord.ok ? <>Read as <b className="mono">{formatLatLng(coord.lat, coord.lng)}</b> ({coord.format}). {coord.warnings.join(' ')}</> : <>Could not read: {coord.error}.</>}
+            </p>
+          )}
           <div className="sm-row">
-            <label className="field">Point
-              <select value={f.kind} onChange={(e) => set('kind', e.target.value as FormState['kind'])}>
+            <label className="field" htmlFor="sm-kind">Point
+              <select id="sm-kind" value={f.kind} onChange={(e) => set('kind', e.target.value as FormState['kind'])}>
                 <option>IPP</option>
                 <option>LKP</option>
                 <option>PLS</option>
               </select>
             </label>
-            <label className="field">Latitude
-              <input inputMode="decimal" value={f.lat} placeholder="51.1234" onChange={(e) => set('lat', e.target.value)} />
-            </label>
-            <label className="field">Longitude
-              <input inputMode="decimal" value={f.lng} placeholder="-115.5678" onChange={(e) => set('lng', e.target.value)} />
+            <label className="field" htmlFor="sm-label">Case label (place and date, no names)
+              <input id="sm-label" value={f.label} maxLength={40} placeholder="e.g. Aurora Lake 2026-07-18" onChange={(e) => set('label', e.target.value)} />
             </label>
           </div>
-          <label className="field">Direction of travel (degrees true, needed for dispersion wedges)
-            <input inputMode="decimal" value={f.bearing} placeholder="leave blank if unknown" onChange={(e) => set('bearing', e.target.value)} />
-          </label>
 
-          <label className="field">Subject category (the one your ring source was looked up for)
-            <select value={f.category} onChange={(e) => set('category', e.target.value)}>
-              <option value="">Not set</option>
-              {SUBJECT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
-
-          <h3>Range rings</h3>
-          <RowsTable rows={f.rings} onChange={(r) => set('rings', r)} unit="km" label="Distance" />
-          <label className="field">Source of these distances (table and subject category)
-            <input value={f.ringSource} placeholder="e.g. ISRID, hiker, mountainous" onChange={(e) => set('ringSource', e.target.value)} />
-          </label>
-
-          <h3>Dispersion angles</h3>
-          <RowsTable rows={f.dispersion} onChange={(r) => set('dispersion', r)} unit="°" label="Angle" />
-          <label className="field">Source of these angles
-            <input value={f.dispersionSource} onChange={(e) => set('dispersionSource', e.target.value)} />
-          </label>
-
-          <h3>Unassigned segments</h3>
+          <h3>3 · Subject</h3>
           <div className="sm-row">
-            <label className="field">Sectors
-              <select value={f.sectors} onChange={(e) => set('sectors', e.target.value)}>
+            <label className="field" htmlFor="sm-cat">Subject category
+              <select id="sm-cat" value={f.category} onChange={(e) => set('category', e.target.value)}>
+                <option value="">Choose</option>
+                {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="field" htmlFor="sm-terrain">Terrain
+              <select id="sm-terrain" value={f.terrain} onChange={(e) => set('terrain', e.target.value)}>
+                <option value="">Choose</option>
+                {[...new Set([...terrs, ...(f.terrain ? [f.terrain] : [])])].map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="field" htmlFor="sm-bearing">Direction of travel (° true)
+              <input id="sm-bearing" inputMode="decimal" value={f.bearing} placeholder="blank if unknown" onChange={(e) => set('bearing', e.target.value)} />
+            </label>
+          </div>
+
+          <h3>4 · Rings and dispersion</h3>
+          <BehaviourTablePanel table={table} onChange={setTable} />
+          {f.manual ? (
+            <>
+              <RowsTable rows={f.rings} onChange={(r) => set('rings', r)} unit="km" label="Distance" />
+              <label className="field" htmlFor="sm-rsrc">Source of these distances
+                <input id="sm-rsrc" value={f.ringSource} onChange={(e) => set('ringSource', e.target.value)} />
+              </label>
+              <RowsTable rows={f.dispersion} onChange={(r) => set('dispersion', r)} unit="°" label="Angle" />
+              <label className="field" htmlFor="sm-dsrc">Source of these angles
+                <input id="sm-dsrc" value={f.dispersionSource} onChange={(e) => set('dispersionSource', e.target.value)} />
+              </label>
+              <button type="button" className="link" onClick={() => set('manual', false)}>Use the behaviour table again</button>
+            </>
+          ) : (
+            <>
+              {input.rings.length > 0 && <LookedUp input={input} />}
+              <button type="button" className="link" onClick={switchToManual}>Enter values by hand instead</button>
+            </>
+          )}
+          {notes.map((n) => <p key={n} className="cap">{n}</p>)}
+
+          <h3>5 · Unassigned segments</h3>
+          <div className="sm-row">
+            <label className="field" htmlFor="sm-sectors">Sectors
+              <select id="sm-sectors" value={f.sectors} onChange={(e) => set('sectors', e.target.value)}>
                 <option value="0">None</option>
                 <option value="4">4</option>
                 <option value="8">8</option>
@@ -304,8 +320,8 @@ export function SearchMapPage() {
                 <option value="16">16</option>
               </select>
             </label>
-            <label className="field">Out to ring
-              <select value={f.outTo} onChange={(e) => set('outTo', e.target.value)} disabled={f.sectors === '0'}>
+            <label className="field" htmlFor="sm-outto">Out to ring
+              <select id="sm-outto" value={f.outTo} onChange={(e) => set('outTo', e.target.value)} disabled={f.sectors === '0'}>
                 {PERCENTS.map((p) => <option key={p} value={p}>{p}%</option>)}
               </select>
             </label>
@@ -318,6 +334,7 @@ export function SearchMapPage() {
             <>
               <Preview map={map} input={input} />
               <p className="meta">{counts.rings} rings · {counts.wedges} wedges · {counts.segments} segments · {GENERATOR_VERSION}</p>
+              {table.kind === 'exercise' && !f.manual && <p className="sm-exercise">Exercise values. Load a behaviour table from a real source before using these rings for anything but training.</p>}
               <button className="primary" onClick={download}>Download CalTopo file</button>
               <p className="cap">In CalTopo, use Import on the map and choose this file. Every feature notes that it was generated in training/research mode and names its source.</p>
             </>

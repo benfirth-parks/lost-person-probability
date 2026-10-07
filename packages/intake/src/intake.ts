@@ -57,7 +57,9 @@ const COMMON = new Set(
     'Party Group Searcher Searchers Team Teams Was Were Is Are Has Had Have Not No Yes And But Or So If Also Seen Found Reported ' +
     'Called Left Started Planned Expected Overdue Missing Last Possibly Probably Likely Unknown Approx Approximately About Around Plan ' +
     'Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October ' +
-    'November December Morning Afternoon Evening Night Today Yesterday Tonight Weather Car Vehicle Truck Male Female Adult Adults Age Aged Partner Friend Friends Father Mother Husband Wife Son Daughter Brother Sister Parent Parents Spouse Call Contact Phone Email Text'
+    'November December Morning Afternoon Evening Night Today Yesterday Tonight Weather Car Vehicle Truck Male Female Adult Adults Age Aged Partner Friend Friends Father Mother Husband Wife Son Daughter Brother Sister Parent Parents Spouse Call Contact Phone Email Text ' +
+    'Heading Headed Travelling Traveling Walking Hiking Going Went Exercise Report Notes Note Terrain Clothing Equipment Trailhead Direction ' +
+    'North South East West Northeast Northwest Southeast Southwest Location Point Planning Initial Search Incident Details Summary Time Date'
   ).split(' '),
 );
 const PLACE_RE = new RegExp(`\\b(?:${PLACE_WORDS.join('|')})\\b`);
@@ -78,8 +80,10 @@ export function redactIncidentText(input: string): Redaction {
   let text = input.replace(EMAIL, () => (removed.email++, '[contact]'));
   text = text.replace(PHONE, () => (removed.phone++, '[contact]'));
   text = text.replace(TITLED, () => (removed.name++, '[person]'));
+  // A capitalised word that also appears in lower case elsewhere in the text is an ordinary word at the start of a sentence.
+  const lower = new Set(input.match(/\b[a-z][a-z'’-]+\b/g) ?? []);
   text = text.replace(CAPITALISED_RUN, (run) =>
-    PLACE_RE.test(run) || run.split(/\s+/).every((w) => COMMON.has(w)) ? run : (removed.name++, '[person]'),
+    PLACE_RE.test(run) || run.split(/\s+/).every((w) => COMMON.has(w) || lower.has(w.toLowerCase())) ? run : (removed.name++, '[person]'),
   );
   text = text.replace(HEALTH_RE, () => (removed.health++, '[health]'));
   return { text, removed };
@@ -90,7 +94,8 @@ export const INTAKE_INSTRUCTIONS = [
   'You read a short land-search incident description and return JSON only, with no other text.',
   'Allowed keys, each optional: "lat" and "lng" (decimal degrees of the planning point),',
   '"pointKind" ("IPP", "LKP" or "PLS"), "travelBearingDeg" (0 to 360, degrees true, only if a direction of travel is stated),',
-  `"subjectCategory" (one of: ${SUBJECT_CATEGORIES.join(', ')}).`,
+  `"subjectCategory" (one of: ${SUBJECT_CATEGORIES.join(', ')}),`,
+  '"terrain" ("mountainous" or "flat", the terrain around the planning point).',
   'Omit any key you are not sure of. Never estimate distances, probabilities, ring sizes or angles. Never add other keys.',
 ].join(' ');
 
@@ -100,6 +105,7 @@ export const IntakeReply = z.object({
   pointKind: z.enum(['IPP', 'LKP', 'PLS']).optional(),
   travelBearingDeg: z.number().min(0).max(360).optional(),
   subjectCategory: z.enum(SUBJECT_CATEGORIES).optional(),
+  terrain: z.enum(['mountainous', 'flat']).optional(),
 });
 export type IntakeFields = z.infer<typeof IntakeReply>;
 
@@ -205,6 +211,8 @@ export const LOCAL_READER: IntakeReader = {
     if (bearing) out.travelBearingDeg = Number(bearing[1]);
     for (const [re, cat] of CATEGORY_WORDS) if (re.test(text)) { out.subjectCategory = cat; break; }
     if (!out.subjectCategory && /\b(?:child|boy|girl|toddler|kid)\b/i.test(text)) out.subjectCategory = 'child';
+    if (/\b(?:mount(?:ain(?:s|ous)?)?|mt|alpine|subalpine|ridge|glacier|scree|peak|summit|canyon|col)\b/i.test(text)) out.terrain = 'mountainous';
+    else if (/\b(?:prairie|flat|grassland|farmland|lowland|plains?)\b/i.test(text)) out.terrain = 'flat';
     return out;
   },
 };

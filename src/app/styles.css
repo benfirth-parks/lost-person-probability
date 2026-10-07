@@ -199,3 +199,21 @@ main { min-width: 0; }
 .sm-intake .sm-row { align-items: end; }
 .sm-sent p { margin: 6px 0 0; font-size: 0.85rem; white-space: pre-wrap; }
 .sm-proposal ul { margin: 4px 0 8px; padding-left: 18px; }
+.sm-form > h3 { margin: 10px 0 0; font: 600 1rem var(--f-display); letter-spacing: 0.01em; }
+.sm-drop { position: relative; border: 1px dashed var(--line); border-radius: 8px; padding: 12px; font-size: 0.85rem; background: var(--surface); }
+.sm-drop input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.sm-drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sm-pick { color: var(--accent); text-decoration: underline; }
+.sm-docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.82rem; }
+.sm-docs li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.sm-doc-name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.sm-doc-bad { color: var(--bad); }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.82rem; justify-self: start; }
+.mono { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+.sm-table { display: grid; gap: 6px; padding: 8px 12px; border-left: 3px solid var(--line); }
+.sm-table.is-exercise { border-left-color: var(--warn); }
+.sm-table p { margin: 0; font-size: 0.85rem; }
+.sm-table-load { display: grid; gap: 8px; }
+.sm-table-load textarea { width: 100%; font: 0.8rem/1.4 var(--f-data); }
+.sm-table-load code { font-size: 0.75rem; overflow-wrap: anywhere; }
+.sm-exercise { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--mode-bg); color: var(--mode); font-size: 0.82rem; }
