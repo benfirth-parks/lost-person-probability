@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": [
+      "node",
+      "vite/client",
+      "geojson"
+    ],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "packages",
+    "demo",
+    "server",
+    "netlify",
+    "src",
+    "vite.config.ts"
+  ]
+}
