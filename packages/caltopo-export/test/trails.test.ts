@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { bufferLine, buildSearchMap, clipToCircle, distanceM, lineLength, localFrame, parseTrailFile, splitEvenly, TEMPLATE_FOLDER_IDS, trailCorridors, type SearchMapInput, type XY } from '../src/index.ts';
+import { bufferLine, buildSearchMap, clipToBand, clipToCircle, joinLines, distanceM, lineLength, localFrame, parseTrailFile, splitEvenly, TEMPLATE_FOLDER_IDS, trailCorridors, type SearchMapInput, type XY } from '../src/index.ts';
 
 const IPP = { lng: -115.8, lat: 51.2 };
 
@@ -54,6 +54,46 @@ describe('clipToCircle', () => {
 
   it('drops a line entirely outside', () => {
     expect(clipToCircle([{ x: 200, y: 0 }, { x: 300, y: 0 }], 100)).toEqual([]);
+  });
+});
+
+describe('clipToBand', () => {
+  it('keeps x = 100 to 200 and x = -200 to -100 of a line from -300 to 300 in the band 100–200 m', () => {
+    const parts = clipToBand([{ x: -300, y: 0 }, { x: 300, y: 0 }], 100, 200);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]!.map((p) => p.x)).toEqual([expect.closeTo(-200, 9), expect.closeTo(-100, 9)]);
+    expect(parts[1]!.map((p) => p.x)).toEqual([expect.closeTo(100, 9), expect.closeTo(200, 9)]);
+  });
+
+  it('never keeps a point outside the band, and never more length than the line (property)', () => {
+    const pt = fc.record({ x: fc.double({ min: -500, max: 500, noNaN: true }), y: fc.double({ min: -500, max: 500, noNaN: true }) });
+    fc.assert(
+      fc.property(fc.array(pt, { minLength: 2, maxLength: 8 }), fc.double({ min: 0, max: 200, noNaN: true }), fc.double({ min: 1, max: 300, noNaN: true }), (line, inner, extra) => {
+        const outer = inner + extra;
+        const parts = clipToBand(line, inner, outer);
+        for (const l of parts) for (const p of l) {
+          const r = Math.hypot(p.x, p.y);
+          expect(r).toBeGreaterThanOrEqual(inner - 1e-6);
+          expect(r).toBeLessThanOrEqual(outer + 1e-6);
+        }
+        expect(parts.reduce((s, l) => s + lineLength(l), 0)).toBeLessThanOrEqual(lineLength(line) + 1e-6);
+      }),
+    );
+  });
+});
+
+describe('joinLines', () => {
+  it('joins a trail drawn in two parts, whichever way each part runs', () => {
+    const a = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+    const b = [{ x: 300, y: 0 }, { x: 100, y: 0 }];
+    const j = joinLines([a, b]);
+    expect(j).toHaveLength(1);
+    expect(lineLength(j[0]!)).toBeCloseTo(300, 9);
+  });
+
+  it('does not join through a junction where three trails meet', () => {
+    const o = { x: 0, y: 0 };
+    expect(joinLines([[o, { x: 100, y: 0 }], [o, { x: 0, y: 100 }], [o, { x: -100, y: 0 }]])).toHaveLength(3);
   });
 });
 
@@ -120,15 +160,32 @@ describe('trailCorridors', () => {
   it('turns 3 km of trail running east from the IPP into three 1 km corridors, stopping at a 2 km radius', () => {
     const f = localFrame(IPP);
     const trail = [IPP, f.toLngLat({ x: 3000, y: 0 })];
-    const c = trailCorridors(IPP, [trail], { halfWidthM: 50, pieceLengthM: 1000, radiusM: 2000 });
+    const c = trailCorridors(IPP, [trail], { halfWidthM: 50, pieceLengthM: 1000, bands: [{ innerM: 0, outerM: 2000 }] });
     expect(c.map((x) => x.name)).toEqual(['T-1', 'T-2']);
     for (const x of c) expect(x.trailLengthM).toBeCloseTo(1000, 3);
+  });
+
+  it('covers only the chosen bands: 3 km of trail east, band 1–2 km, gives one 1 km piece from x = 1000 to 2000', () => {
+    const f = localFrame(IPP);
+    const c = trailCorridors(IPP, [[IPP, f.toLngLat({ x: 3000, y: 0 })]], { halfWidthM: 50, pieceLengthM: 1000, bands: [{ innerM: 1000, outerM: 2000 }] });
+    expect(c).toHaveLength(1);
+    expect(c[0]!.trailLengthM).toBeCloseTo(1000, 3);
+    const xs = c[0]!.rings[0]!.map((p) => f.toXY(p).x);
+    expect(Math.min(...xs)).toBeCloseTo(950, 0);
+    expect(Math.max(...xs)).toBeCloseTo(2050, 0);
+  });
+
+  it('treats touching bands as one, so a trail is not cut at the ring between them', () => {
+    const f = localFrame(IPP);
+    const c = trailCorridors(IPP, [[IPP, f.toLngLat({ x: 1500, y: 0 })]], { halfWidthM: 50, pieceLengthM: 1500, bands: [{ innerM: 0, outerM: 1000 }, { innerM: 1000, outerM: 2000 }] });
+    expect(c).toHaveLength(1);
+    expect(c[0]!.trailLengthM).toBeCloseTo(1500, 3);
   });
 
   it('does not change the trails it is given', () => {
     const trail = [IPP, { lng: IPP.lng + 0.01, lat: IPP.lat }];
     const copy = structuredClone(trail);
-    trailCorridors(IPP, [trail], { halfWidthM: 50, pieceLengthM: 1000, radiusM: 2000 });
+    trailCorridors(IPP, [trail], { halfWidthM: 50, pieceLengthM: 1000, bands: [{ innerM: 0, outerM: 2000 }] });
     expect(trail).toEqual(copy);
   });
 });
@@ -172,10 +229,10 @@ describe('search map with trails', () => {
       { percent: 95, distanceKm: 10 },
     ],
     ringSource: 'test values',
-    trails: { lines: [[IPP, f.toLngLat({ x: 0, y: 3000 })]], halfWidthM: 50, pieceLengthM: 1000, outToPercent: 50 },
+    trails: { lines: [[IPP, f.toLngLat({ x: 0, y: 3000 })]], halfWidthM: 50, pieceLengthM: 1000, inRings: [50] },
   };
 
-  it('adds draft ground assignments T-1, T-2 in 8 - Unassigned Segments and notes the width on the IPP', () => {
+  it('adds draft ground assignments T-1, T-2 in 8 - Unassigned Segments and notes the width in the file metadata', () => {
     const map = buildSearchMap(input);
     const t = map.features.filter((x) => String(x.properties.title).startsWith('T-'));
     expect(t.map((x) => x.properties.title)).toEqual(['T-1', 'T-2']);
@@ -184,11 +241,11 @@ describe('search map with trails', () => {
       expect(x.properties.description).toBeUndefined();
       expect(x.geometry?.type).toBe('Polygon');
     }
-    const ipp = map.features.find((x) => x.properties.class === 'Marker')!;
-    expect(ipp.properties.description).toMatch(/Trail segments: 50 m either side/);
+    expect(map.features.find((x) => x.properties.class === 'Marker')!.properties.description).toBeUndefined();
+    expect(map.metadata.provenance).toMatch(/Trail segments: 50 m either side/);
   });
 
-  it('refuses a trail cut-off ring that does not exist', () => {
-    expect(() => buildSearchMap({ ...input, trails: { ...input.trails!, outToPercent: 75 } })).toThrow(/no 75% ring/);
+  it('refuses a trail ring band that does not exist', () => {
+    expect(() => buildSearchMap({ ...input, trails: { ...input.trails!, inRings: [75] } })).toThrow(/no 75% ring band/);
   });
 });

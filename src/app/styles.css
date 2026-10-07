@@ -187,13 +187,31 @@ main { min-width: 0; }
 .sm-out { display: grid; gap: 8px; position: sticky; top: 12px; }
 .sm-todo { border: 1px dashed var(--line, rgba(127,127,127,.4)); border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; }
 .sm-todo ul { margin: 6px 0 0; padding-left: 18px; }
-.sm-preview { width: 100%; max-width: 440px; aspect-ratio: 1; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; }
-.sm-preview .ring { fill: none; stroke: #d6336c; stroke-width: 0.7; }
-.sm-preview .wedge { fill: rgba(245, 159, 0, 0.18); stroke: #f59f00; stroke-width: 0.5; }
-.sm-preview .seg { fill: rgba(25, 113, 194, 0.06); stroke: #1971c2; stroke-width: 0.35; }
-.sm-preview .trail { fill: rgba(47, 158, 68, 0.35); stroke: #2f9e44; stroke-width: 0.4; }
-.sm-preview .pp { fill: currentColor; }
-.sm-preview .n { font-size: 7px; fill: currentColor; }
+.sm-map { display: grid; gap: 6px; }
+.sm-map.full { position: fixed; inset: 0; z-index: 50; padding: 12px 16px; background: var(--bg); grid-template-rows: auto 1fr auto; }
+.sm-map-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; }
+.sm-map-bar button { min-width: 2.2em; padding: 3px 8px; }
+.sm-map-layers { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.sm-map-layers label { display: inline-flex; gap: 4px; align-items: center; }
+.sm-map-view { position: relative; width: 100%; aspect-ratio: 1; min-height: 280px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; overflow: hidden; background: #f4f4f1; touch-action: none; }
+.sm-map.full .sm-map-view { aspect-ratio: auto; }
+.sm-map-view svg { display: block; width: 100%; height: 100%; cursor: grab; user-select: none; }
+.sm-map-view svg:active { cursor: grabbing; }
+.sm-map-view .shade { opacity: 0.75; }
+.sm-map-view path.ring { fill: none; stroke: #2b8a3e; stroke-width: 2; }
+.sm-map-view path.wedge { fill: rgba(245, 159, 0, 0.16); stroke: #e8590c; stroke-width: 1; }
+.sm-map-view path.area, .sm-map-view path.sector { fill: rgba(224, 49, 49, 0.06); stroke: #c92a2a; stroke-width: 1.2; }
+.sm-map-view path.trail { fill: rgba(25, 113, 194, 0.35); stroke: #1864ab; stroke-width: 1; }
+.sm-map-view path.hot { fill: rgba(250, 176, 5, 0.35); stroke-width: 2.5; }
+.sm-map-view .lbl { pointer-events: none; font-weight: 600; paint-order: stroke; stroke: rgba(255,255,255,.85); stroke-width: 3px; stroke-linejoin: round; }
+.sm-map-view .lbl.area, .sm-map-view .lbl.sector { fill: #a61e1e; }
+.sm-map-view .lbl.trail { fill: #0b4f8a; }
+.sm-map-view .lbl.ring { fill: #1f6f30; }
+.sm-map-view .lbl.wedge { fill: #b3440a; }
+.sm-map-view .pp { fill: #e03131; stroke: #fff; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.sm-map-view .scale line { stroke: #222; stroke-width: 3; }
+.sm-map-view .scale text, .sm-map-view .north { fill: #222; font-weight: 600; paint-order: stroke; stroke: rgba(255,255,255,.85); stroke-width: 3px; }
+.sm-map-tip { position: absolute; left: 8px; top: 8px; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,.92); color: #222; font-size: 0.8rem; pointer-events: none; }
 .sm-intake { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; }
 .sm-intake h3 { margin: 0; }
 .sm-intake textarea { width: 100%; font: inherit; }
@@ -219,6 +237,10 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); tex
 .sm-table-load code { font-size: 0.75rem; overflow-wrap: anywhere; }
 .sm-exercise { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--mode-bg); color: var(--mode); font-size: 0.82rem; }
 .sm-check { display: flex; gap: .5rem; align-items: center; margin: .25rem 0 .5rem; }
+.sm-bands { display: flex; flex-wrap: wrap; gap: 0 1rem; border: 0; padding: 0; margin: .25rem 0; }
+.sm-bands legend { padding: 0; font-size: .9em; }
+.sm-bands .sm-check { margin: .2rem 0; }
+.sm-bands:disabled { opacity: .5; }
 .sm-pod-defaults { align-items: center; flex-wrap: wrap; gap: .4rem; }
 .sm-pod-table-wrap { max-height: 22rem; overflow: auto; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 6px; }
 .sm-pod-table { width: 100%; border-collapse: collapse; font-size: .85rem; }

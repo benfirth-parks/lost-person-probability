@@ -17,7 +17,7 @@ const INPUT: SearchMapInput = {
   ringSource: 'test values',
   dispersion: [{ percent: 25, angleDeg: 90 }, { percent: 50, angleDeg: 120 }],
   dispersionSource: 'test values',
-  segments: { sectors: 8, outToPercent: 75 },
+  segments: { sectors: 8, inRings: [25, 50, 75] },
 };
 const pt = (c: number[]) => ({ lng: c[0]!, lat: c[1]! });
 
@@ -73,14 +73,13 @@ describe('buildSearchMap', () => {
     expect(m!.geometry).toEqual({ type: 'Point', coordinates: [-115.8, 51.2, 0, 0] });
   });
 
-  it('titles rings like the examples, with the mode and sources noted once on the planning point', () => {
+  it('titles rings like the examples, with the mode and sources in the file metadata, not on any feature', () => {
     const rings = map.features.filter((f) => f.geometry?.type === 'LineString');
     expect(rings.map((f) => f.properties.title)).toEqual(['25% 1 km', '50% 2 km', '75% 4 km', '95% 10 km']);
     const odd = buildSearchMap({ ...INPUT, rings: [{ percent: 50, distanceKm: 3.65 }, { percent: 95, distanceKm: 18.3 }], dispersion: [], segments: undefined });
     expect(odd.features.filter((f) => f.geometry?.type === 'LineString').map((f) => f.properties.title)).toEqual(['50% 3.65 km', '95% 18.3 km']);
-    for (const r of rings) expect(r.properties.description).toBeUndefined();
-    const [pp] = map.features.filter((f) => f.properties.class === 'Marker');
-    expect(pp!.properties.description).toMatch(/training\/research mode.*Rings: test values.*Dispersion around 90° true: test values/s);
+    for (const f of map.features) expect(f.properties.description).toBeUndefined();
+    expect(map.metadata.provenance).toMatch(/training\/research mode.*Rings: test values.*Dispersion around 90° true: test values/s);
   });
 
   it('cuts 3 ring bands × 8 sectors = 24 draft ground segments out to the 75% ring', () => {
@@ -88,6 +87,23 @@ describe('buildSearchMap', () => {
     expect(segs).toHaveLength(24);
     expect(segs[0]!.properties).toMatchObject({ title: 'R1-N', status: 'DRAFT', resourceType: 'GROUND' });
     expect(segs.map((s) => s.properties.title)).toContain('R3-SW');
+  });
+
+  it('cuts only the chosen ring bands, keeping each band its ring number: 50–75% and 75–95% give R3 and R4, 16 segments', () => {
+    const map = buildSearchMap({ ...INPUT, segments: { sectors: 8, inRings: [75, 95] } });
+    const names = map.features.filter((f) => f.properties.class === 'Assignment').map((f) => String(f.properties.title));
+    expect(names).toHaveLength(16);
+    expect(new Set(names.map((n) => n.split('-')[0]))).toEqual(new Set(['R3', 'R4']));
+    // R3-N runs from the 50% ring (2 km) out to the 75% ring (4 km).
+    const r3n = map.features.find((f) => f.properties.title === 'R3-N')!;
+    const d = (r3n.geometry as { coordinates: number[][][] }).coordinates[0]!.map((c) => distanceM(IPP, pt(c)));
+    expect(Math.min(...d)).toBeCloseTo(2000, 0);
+    expect(Math.max(...d)).toBeCloseTo(4000, 0);
+  });
+
+  it('refuses ring bands that are missing or not chosen at all', () => {
+    expect(validateSearchMapInput({ ...INPUT, segments: { sectors: 8, inRings: [] } })).toContain('segments: choose at least one ring band');
+    expect(validateSearchMapInput({ ...INPUT, segments: { sectors: 8, inRings: [60] } })).toContain('segments: there is no 60% ring band');
   });
 
   it('gives the same file for the same input', () => {
@@ -130,13 +146,13 @@ describe('validateSearchMapInput', () => {
 describe('segment PODs', () => {
   const pods = { 'R1-N': { resourceType: 'DOG_TRAIL', responsivePOD: 'HIGH', unresponsivePOD: 'MEDIUM', cluePOD: 'LOW' } } as const;
 
-  it('writes CalTopo POD fields on the named segment only, and notes the source on the IPP', () => {
+  it('writes CalTopo POD fields on the named segment only, and records the source in the file metadata', () => {
     const map = buildSearchMap({ ...INPUT, segmentPods: pods, segmentPodSource: 'test values' });
     const seg = (n: string) => map.features.find((f) => f.properties.title === n)!.properties;
     expect(seg('R1-N')).toMatchObject({ resourceType: 'DOG_TRAIL', responsivePOD: 'HIGH', unresponsivePOD: 'MEDIUM', cluePOD: 'LOW', status: 'DRAFT' });
     expect(seg('R1-NE').responsivePOD).toBeUndefined();
     expect(seg('R1-NE').resourceType).toBe('GROUND');
-    expect(map.features.find((f) => f.properties.class === 'Marker')!.properties.description).toMatch(/Segment PODs are planned, not achieved: test values/);
+    expect(map.metadata.provenance).toMatch(/Segment PODs are planned, not achieved: test values/);
   });
 
   it('refuses PODs without a source, or with values CalTopo does not use', () => {

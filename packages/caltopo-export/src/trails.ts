@@ -13,7 +13,7 @@ import type { LngLat } from './search-map.ts';
  * (metres east and north). Over the tens of kilometres a search map covers the
  * distortion is well under a metre per kilometre, far below the corridor width.
  */
-export const TRAILS_VERSION = 'trail-corridors@0.1.0';
+export const TRAILS_VERSION = 'trail-corridors@0.2.0';
 
 const EARTH_RADIUS_M = 6_371_008.8;
 const rad = (d: number) => (d * Math.PI) / 180;
@@ -48,48 +48,89 @@ export function lineLength(line: readonly XY[]): number {
 }
 
 /**
- * The parts of a line inside a circle of `radius` about the origin, in order.
- * Each leg that crosses the circle is cut where it crosses.
+ * The parts of a line between `innerM` and `outerM` of the origin (a ring band;
+ * an inner radius of 0 gives the whole circle), in order. Each leg is cut where
+ * it crosses either circle.
  */
-export function clipToCircle(line: readonly XY[], radius: number): XY[][] {
-  const inside = (p: XY) => Math.hypot(p.x, p.y) <= radius;
-  /** Parameters in (0,1) where leg a→b crosses the circle, ascending. */
-  const crossings = (a: XY, b: XY): number[] => {
+export function clipToBand(line: readonly XY[], innerM: number, outerM: number): XY[][] {
+  const inBand = (p: XY) => {
+    const r = Math.hypot(p.x, p.y);
+    return r >= innerM && r <= outerM;
+  };
+  /** Parameters in (0,1) where leg a→b crosses a circle of radius r. */
+  const crossings = (a: XY, b: XY, r: number): number[] => {
+    if (r <= 0) return [];
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const A = dx * dx + dy * dy;
     const B = 2 * (a.x * dx + a.y * dy);
-    const C = a.x * a.x + a.y * a.y - radius * radius;
+    const C = a.x * a.x + a.y * a.y - r * r;
     const disc = B * B - 4 * A * C;
     if (A === 0 || disc <= 0) return [];
-    const r = Math.sqrt(disc);
-    return [(-B - r) / (2 * A), (-B + r) / (2 * A)].filter((t) => t > 0 && t < 1);
+    const q = Math.sqrt(disc);
+    return [(-B - q) / (2 * A), (-B + q) / (2 * A)].filter((t) => t > 0 && t < 1);
   };
   const out: XY[][] = [];
   let cur: XY[] = [];
-  for (let i = 0; i < line.length; i++) {
-    const p = line[i]!;
-    if (i === 0) {
-      if (inside(p)) cur.push(p);
-      continue;
-    }
+  for (let i = 1; i < line.length; i++) {
     const a = line[i - 1]!;
-    for (const t of crossings(a, p)) {
-      const q = lerp(a, p, t);
-      if (cur.length) {
-        cur.push(q);
+    const b = line[i]!;
+    const ts = [0, ...crossings(a, b, innerM), ...crossings(a, b, outerM), 1].sort((u, v) => u - v);
+    for (let k = 1; k < ts.length; k++) {
+      if (ts[k]! - ts[k - 1]! <= 0) continue;
+      // Each piece between crossings is wholly in or out of the band: test its middle.
+      if (inBand(lerp(a, b, (ts[k - 1]! + ts[k]!) / 2))) {
+        if (!cur.length) cur.push(lerp(a, b, ts[k - 1]!));
+        cur.push(lerp(a, b, ts[k]!));
+      } else if (cur.length) {
         out.push(cur);
         cur = [];
-      } else cur.push(q);
-    }
-    if (inside(p)) cur.push(p);
-    else if (cur.length) {
-      out.push(cur);
-      cur = [];
+      }
     }
   }
   if (cur.length) out.push(cur);
-  return out.filter((l) => l.length >= 2 && lineLength(l) > 0);
+  return out.map((l) => l.filter((q, i) => i === 0 || len(l[i - 1]!, q) > 1e-9)).filter((l) => l.length >= 2 && lineLength(l) > 0);
+}
+
+/** The parts of a line inside a circle of `radius` about the origin, in order. */
+export function clipToCircle(line: readonly XY[], radius: number): XY[][] {
+  return clipToBand(line, 0, radius);
+}
+
+/**
+ * Joins lines that meet end to end where only those two lines meet (a trail
+ * drawn in several parts), so pieces are not cut short at every join. Lines are
+ * not joined through a junction of three or more. Ends within `toleranceM` meet.
+ */
+export function joinLines(lines: readonly (readonly XY[])[], toleranceM = 1): XY[][] {
+  const key = (p: XY) => `${Math.round(p.x / toleranceM)},${Math.round(p.y / toleranceM)}`;
+  const degree = new Map<string, number>();
+  for (const l of lines) for (const p of [l[0]!, l[l.length - 1]!]) degree.set(key(p), (degree.get(key(p)) ?? 0) + 1);
+  const used = new Array<boolean>(lines.length).fill(false);
+  const out: XY[][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    let cur = [...lines[i]!];
+    // Grow the end, then the start, while exactly one other unused line meets there.
+    for (const atEnd of [true, false]) {
+      for (;;) {
+        const tip = atEnd ? cur[cur.length - 1]! : cur[0]!;
+        const k = key(tip);
+        if (degree.get(k) !== 2) break;
+        const j = lines.findIndex((l, n) => !used[n] && (key(l[0]!) === k || key(l[l.length - 1]!) === k));
+        if (j < 0) break;
+        used[j] = true;
+        const l = lines[j]!;
+        const fwd = key(l[0]!) === k ? [...l] : [...l].reverse();
+        // fwd starts at the tip.
+        cur = atEnd ? [...cur, ...fwd.slice(1)] : [...fwd.reverse().slice(0, -1), ...cur];
+        if (key(cur[0]!) === key(cur[cur.length - 1]!) && cur.length > 2) break; // closed loop
+      }
+    }
+    out.push(cur);
+  }
+  return out;
 }
 
 /**
@@ -172,25 +213,41 @@ export interface TrailCorridorOptions {
   halfWidthM: number;
   /** Target piece length along the trail, in metres. */
   pieceLengthM: number;
-  /** Only trail within this distance of the planning point is used. */
-  radiusM: number;
+  /**
+   * Ring bands to cover, as distances from the planning point (inner 0 for the
+   * innermost). Touching bands are treated as one, so pieces are not cut at a
+   * ring between two chosen bands.
+   */
+  bands: { innerM: number; outerM: number }[];
 }
 
 export const DEFAULT_TRAIL_OPTIONS = { halfWidthM: 50, pieceLengthM: 1000 } as const;
 
-/** Corridor polygons for every trail within `radiusM` of `origin`. Inputs are not changed. */
+/** Corridor polygons for every trail inside the chosen ring bands around `origin`. Inputs are not changed. */
 export function trailCorridors(origin: LngLat, trails: readonly (readonly LngLat[])[], opts: TrailCorridorOptions): TrailCorridor[] {
   if (!(opts.halfWidthM >= 5 && opts.halfWidthM <= 1000)) throw new Error('corridor half-width must be 5 to 1000 m');
   if (!(opts.pieceLengthM >= 100 && opts.pieceLengthM <= 20000)) throw new Error('piece length must be 100 m to 20 km');
   const f = localFrame(origin);
   const out: TrailCorridor[] = [];
-  for (const trail of trails) {
-    for (const part of clipToCircle(trail.map(f.toXY), opts.radiusM)) {
+  const lines = joinLines(trails.map((t) => t.map(f.toXY)));
+  for (const band of mergeBands(opts.bands)) {
+    for (const part of lines.flatMap((l) => clipToBand(l, band.innerM, band.outerM))) {
       for (const piece of splitEvenly(part, opts.pieceLengthM)) {
         const rings = bufferLine(piece, opts.halfWidthM).map((r) => r.map(([x, y]) => f.toLngLat({ x, y })));
         out.push({ name: `T-${out.length + 1}`, rings, trailLengthM: lineLength(piece) });
       }
     }
+  }
+  return out;
+}
+
+/** Bands sorted outwards, with touching or overlapping bands joined. */
+export function mergeBands(bands: readonly { innerM: number; outerM: number }[]): { innerM: number; outerM: number }[] {
+  const out: { innerM: number; outerM: number }[] = [];
+  for (const b of [...bands].sort((p, q) => p.innerM - q.innerM)) {
+    const last = out[out.length - 1];
+    if (last && b.innerM <= last.outerM) last.outerM = Math.max(last.outerM, b.outerM);
+    else out.push({ ...b });
   }
   return out;
 }
