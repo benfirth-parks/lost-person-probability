@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { categories, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
+import { categories, LPB_CATEGORIES, LPB_TABLE, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
 import {
   buildSearchMap,
   distanceM,
@@ -11,7 +11,7 @@ import {
 } from '../../../packages/caltopo-export/src/index.ts';
 import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/coords.ts';
 import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
-import { BehaviourTablePanel, loadSavedTable } from './BehaviourTablePanel.tsx';
+import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
 
 /**
@@ -53,7 +53,7 @@ const INITIAL: FormState = {
   kind: 'IPP',
   bearing: '',
   category: '',
-  terrain: '',
+  terrain: 'temperate mountainous',
   manual: false,
   rings: emptyRows(),
   ringSource: '',
@@ -184,22 +184,29 @@ function LookedUp({ input }: { input: SearchMapInput }) {
 
 export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [f, setF] = useState<FormState>(INITIAL);
-  const [table, setTable] = useState<BehaviourTable>(loadSavedTable);
+  const [table, setTable] = useState<BehaviourTable>(LPB_TABLE);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
   const { input, notes } = useMemo(() => toInput(f, table), [f, table]);
   const errors = useMemo(() => {
     const e = validateSearchMapInput(input);
-    if (!f.manual && !input.rings.length) e.unshift(f.category && f.terrain ? `the table has no row for ${f.category}` : 'choose a subject category and terrain to look up the rings');
+    if (!f.manual && !input.rings.length)
+      e.unshift(
+        f.category && f.terrain
+          ? `${table.name} has no ${f.terrain} figures for ${f.category}. Load them from the book under "Load rows from a source", or enter values by hand`
+          : 'choose a subject category and terrain to look up the rings',
+      );
     return e.filter((x) => !(x.startsWith('ring source') && !f.manual && !input.rings.length));
-  }, [input, f.manual, f.category, f.terrain]);
+  }, [input, f.manual, f.category, f.terrain, table.name]);
   const map = useMemo(() => (errors.length ? null : buildSearchMap(input)), [errors, input]);
   const counts = map && {
     rings: map.features.filter((x) => x.geometry?.type === 'LineString').length,
     wedges: map.features.filter((x) => x.geometry?.type === 'Polygon' && x.properties.class === 'Shape').length,
     segments: map.features.filter((x) => x.properties.class === 'Assignment').length,
   };
-  const cats = categories(table);
+  const withFigures = categories(table);
+  // The book's full category list stays visible, so a missing category reads as "no figures yet" rather than as absent.
+  const cats = [...new Set([...withFigures, ...(table === LPB_TABLE ? LPB_CATEGORIES : [])])];
   const terrs = terrains(table, f.category || undefined).filter((t) => t !== 'any');
 
   function applyIntake(x: IntakeFields) {
@@ -209,7 +216,8 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
       kind: x.pointKind ?? cur.kind,
       bearing: x.travelBearingDeg !== undefined ? String(x.travelBearingDeg) : cur.bearing,
       category: x.subjectCategory && cats.includes(x.subjectCategory) ? x.subjectCategory : cur.category,
-      terrain: x.terrain ?? cur.terrain,
+      // The reader says mountainous or flat; take the table's first terrain with that word (temperate before dry).
+      terrain: (x.terrain && terrains(table).find((t) => t === x.terrain || t.endsWith(` ${x.terrain}`))) || cur.terrain,
     }));
   }
 
@@ -240,7 +248,8 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
       <h2>Search map for CalTopo</h2>
       <p className="lede">
         Builds range rings, dispersion wedges and first-cut segments in the BYK template folders, as a file to import into CalTopo. Rings and angles come from the behaviour
-        table for the subject category and terrain. It runs in this browser and sends nothing anywhere.
+        table for the subject category and terrain: the distances within which 25, 50, 75 and 95% of past subjects in that category were found. They are
+        not detection probabilities. It runs in this browser and sends nothing anywhere.
       </p>
       <div className="sm-grid">
         <div className="sm-form">
@@ -273,7 +282,7 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
             <label className="field" htmlFor="sm-cat">Subject category
               <select id="sm-cat" value={f.category} onChange={(e) => set('category', e.target.value)}>
                 <option value="">Choose</option>
-                {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+                {cats.map((c) => <option key={c} value={c}>{c}{withFigures.includes(c) ? '' : ' (no figures loaded)'}</option>)}
               </select>
             </label>
             <label className="field" htmlFor="sm-terrain">Terrain

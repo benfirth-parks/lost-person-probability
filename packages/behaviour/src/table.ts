@@ -30,6 +30,8 @@ export const BehaviourEntry = z
     dispersionDeg: Quartiles.refine(increasing, 'dispersion angles must increase from 25% to 95%')
       .refine((q) => q[95] <= 360, 'a dispersion angle cannot exceed 360°')
       .optional(),
+    /** Cases behind the dispersion angles, which the source may count separately from the distances. */
+    dispersionN: z.number().int().positive().optional(),
   })
   .strict();
 export type BehaviourEntry = z.infer<typeof BehaviourEntry>;
@@ -71,7 +73,7 @@ export interface Lookup {
   citation: string;
 }
 
-/** The row for a category and terrain, falling back to the category's "any" row. Null when the table has neither. */
+/** The row for a category and terrain, falling back to the category's "any" row. Null when the table has neither. Percentile rings say where past subjects were found; they are not detection probabilities or boundaries. */
 export function lookupBehaviour(table: BehaviourTable, category: string, terrain: string): Lookup | null {
   const c = category.trim().toLowerCase();
   const t = terrain.trim().toLowerCase();
@@ -79,8 +81,9 @@ export function lookupBehaviour(table: BehaviourTable, category: string, terrain
   const entry = exact ?? table.entries.find((e) => e.category === c && e.terrain === 'any');
   if (!entry) return null;
   const n = entry.n ? `, n=${entry.n}` : '';
+  const dn = entry.dispersionDeg && entry.dispersionN ? `; dispersion n=${entry.dispersionN}` : '';
   const label = table.kind === 'exercise' ? `${table.name} (exercise values, not research data)` : table.name;
-  return { entry, terrainFallback: !exact, citation: `${label}: ${entry.category}, ${entry.terrain}${n}. Source: ${table.source}` };
+  return { entry, terrainFallback: !exact, citation: `${label}: ${entry.category}, ${entry.terrain}${n}${dn}. Source: ${table.source}` };
 }
 
 export const categories = (t: BehaviourTable) => [...new Set(t.entries.map((e) => e.category))];

@@ -1,17 +1,19 @@
 import { useState } from 'react';
-import { BehaviourTable, CSV_HEADER, EXERCISE_TABLE, parseBehaviourCsv, type TableProblem } from '../../../packages/behaviour/src/index.ts';
+import { BehaviourTable, CSV_HEADER, EXERCISE_TABLE, LPB_TABLE, parseBehaviourCsv, type TableProblem } from '../../../packages/behaviour/src/index.ts';
+
+export const BUILT_IN_TABLES: BehaviourTable[] = [LPB_TABLE, EXERCISE_TABLE];
 
 const KEY = 'lppm.behaviourTable.v1';
 
-/** The table last loaded on this computer, or the exercise table. Browser storage only; it never leaves this computer. */
-export function loadSavedTable(): BehaviourTable {
+/** The table last loaded on this computer, if any. Browser storage only; it never leaves this computer. */
+export function loadSavedTable(): BehaviourTable | null {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return EXERCISE_TABLE;
+    if (!raw) return null;
     const t = BehaviourTable.safeParse(JSON.parse(raw));
-    return t.success ? t.data : EXERCISE_TABLE;
+    return t.success ? t.data : null;
   } catch {
-    return EXERCISE_TABLE;
+    return null;
   }
 }
 
@@ -24,8 +26,10 @@ function save(t: BehaviourTable | null) {
   }
 }
 
-/** Shows which table the rings come from, and lets the planner load their own from CSV. */
+/** Shows which table the rings come from, lets the planner switch tables, and load their own from CSV. */
 export function BehaviourTablePanel({ table, onChange }: { table: BehaviourTable; onChange: (t: BehaviourTable) => void }) {
+  const [saved, setSaved] = useState<BehaviourTable | null>(loadSavedTable);
+  const tables = [...BUILT_IN_TABLES, ...(saved ? [saved] : [])];
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [source, setSource] = useState('');
@@ -40,6 +44,7 @@ export function BehaviourTablePanel({ table, onChange }: { table: BehaviourTable
     if (!name.trim() || !source.trim()) return setProblems([{ line: 0, message: 'give the table a name and its full source' }]);
     setProblems([]);
     save(r.table);
+    setSaved(r.table);
     onChange(r.table);
     setOpen(false);
   }
@@ -47,15 +52,15 @@ export function BehaviourTablePanel({ table, onChange }: { table: BehaviourTable
   const exercise = table.kind === 'exercise';
   return (
     <div className={`sm-table ${exercise ? 'is-exercise' : ''}`}>
-      <p>
-        <b>Behaviour table:</b> {table.name}{' '}
-        <span className="meta">({table.entries.length} rows)</span>
-        <br />
-        <span className="cap">{table.source}</span>
-      </p>
+      <label className="field" htmlFor="bt-pick">Behaviour table
+        <select id="bt-pick" value={table.name} onChange={(e) => onChange(tables.find((t) => t.name === e.target.value)!)}>
+          {tables.map((t) => <option key={t.name} value={t.name}>{t.name} ({t.entries.length} rows)</option>)}
+        </select>
+      </label>
+      <p className="cap">{table.source}</p>
       <div className="sm-row">
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? 'Close' : 'Load a table'}</button>
-        {!exercise && <button type="button" onClick={() => { save(null); onChange(EXERCISE_TABLE); }}>Back to exercise values</button>}
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? 'Close' : 'Load rows from a source'}</button>
+        {saved && <button type="button" onClick={() => { save(null); setSaved(null); if (table === saved) onChange(LPB_TABLE); }}>Remove {saved.name}</button>}
       </div>
       {open && (
         <div className="sm-table-load">
@@ -66,7 +71,7 @@ export function BehaviourTablePanel({ table, onChange }: { table: BehaviourTable
           </p>
           <div className="sm-row">
             <label className="field" htmlFor="bt-name">Table name
-              <input id="bt-name" value={name} maxLength={80} placeholder="e.g. ISRID distances" onChange={(e) => setName(e.target.value)} />
+              <input id="bt-name" value={name} maxLength={80} placeholder="e.g. Lost Person Behavior, hiker and hunter" onChange={(e) => setName(e.target.value)} />
             </label>
             <label className="field" htmlFor="bt-kind">Kind
               <select id="bt-kind" value={kind} onChange={(e) => setKind(e.target.value as 'published' | 'agency')}>
