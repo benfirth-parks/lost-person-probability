@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { categories, LPB_CATEGORIES, LPB_TABLE, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
 import {
   buildSearchMap,
@@ -16,6 +16,7 @@ import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/in
 import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
 import { INITIAL_POD_STATE, SegmentPodPanel, segmentPodsFor, type PodState } from './SegmentPodPanel.tsx';
+import { insideCoverage, loadTerrainIndex, loadTerrainLines, type TerrainLines } from './terrain.ts';
 
 /**
  * Builds a CalTopo search map from incident details: range rings and dispersion
@@ -46,8 +47,11 @@ interface FormState {
   ringSource: string;
   dispersion: Row[];
   dispersionSource: string;
+  /** "0" none, "4"–"16" ring sectors, or "terrain" for areas cut along bundled terrain lines. */
   sectors: string;
   outTo: string;
+  /** Largest terrain area segment, km². */
+  areaMax: string;
   /** Trail corridor half-width (m), piece length (km) and the ring they stop at. */
   trailWidth: string;
   trailPiece: string;
@@ -75,12 +79,13 @@ const INITIAL: FormState = {
   dispersionSource: '',
   sectors: '8',
   outTo: '75',
+  areaMax: '1',
   trailWidth: String(DEFAULT_TRAIL_OPTIONS.halfWidthM),
   trailPiece: String(DEFAULT_TRAIL_OPTIONS.pieceLengthM / 1000),
   trailOutTo: '75',
 };
 
-function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null): { input: SearchMapInput; notes: string[] } {
+function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null, terrain: TerrainLines | null = null): { input: SearchMapInput; notes: string[] } {
   const notes: string[] = [];
   const parsed = parseCoordinate(f.coord);
   const bearing = f.bearing.trim() === '' ? undefined : num(f.bearing);
@@ -117,7 +122,11 @@ function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null):
       ringSource,
       dispersion,
       dispersionSource,
-      segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
+      segments: f.sectors === '0' || f.sectors === 'terrain' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
+      areas:
+        f.sectors === 'terrain' && terrain
+          ? { lines: terrain.lines, maxAreaM2: num(f.areaMax) * 1e6, outToPercent: num(f.outTo), source: `${terrain.source} streams, lake shores, roads and trails` }
+          : undefined,
       trails: trails?.lines.length
         ? { lines: trails.lines, halfWidthM: num(f.trailWidth), pieceLengthM: num(f.trailPiece) * 1000, outToPercent: num(f.trailOutTo) }
         : undefined,
@@ -208,9 +217,44 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [trails, setTrails] = useState<TrailFile | null>(null);
   const [trailProblem, setTrailProblem] = useState('');
   const [podState, setPodState] = useState<PodState>(INITIAL_POD_STATE);
+  const [terrain, setTerrain] = useState<TerrainLines | null>(null);
+  const [terrainNote, setTerrainNote] = useState('');
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
-  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails), [f, table, trails]);
+  // Where to load terrain for: the planning point and the cut-off ring, taken before terrain is attached.
+  const terrainNeed = useMemo(() => {
+    if (f.sectors !== 'terrain') return null;
+    const pre = toInput(f, table, trails).input;
+    const ring = pre.rings.find((r) => r.percent === num(f.outTo));
+    const { lat, lng } = pre.planningPoint;
+    return ring && Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng, radiusM: ring.distanceKm * 1000 } : null;
+  }, [f, table, trails]);
+  const terrainKey = terrainNeed && `${terrainNeed.lat},${terrainNeed.lng},${terrainNeed.radiusM}`;
+  useEffect(() => {
+    setTerrain(null);
+    if (!terrainNeed) {
+      setTerrainNote(f.sectors === 'terrain' ? 'Enter the planning point and rings to load terrain.' : '');
+      return;
+    }
+    let live = true;
+    setTerrainNote('Loading terrain lines…');
+    (async () => {
+      try {
+        const index = await loadTerrainIndex();
+        if (!insideCoverage(index, terrainNeed.lat, terrainNeed.lng)) throw new Error('the planning point is outside the bundled terrain data (Alberta mountain parks)');
+        const t = await loadTerrainLines(index, terrainNeed.lat, terrainNeed.lng, terrainNeed.radiusM);
+        if (!live) return;
+        setTerrain(t);
+        setTerrainNote(`${t.counts.stream} streams, ${t.counts.lake} lake shores, ${t.counts.road} roads and ${t.counts.trail} trails inside the ring. Source: ${t.source}.`);
+      } catch (e) {
+        if (live) setTerrainNote(`No terrain areas: ${(e as Error).message}.`);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [terrainKey, f.sectors]);
+  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails, terrain), [f, table, trails, terrain]);
   // Segment names come from the map without PODs; PODs never change which segments exist.
   const segmentNames = useMemo(() => {
     if (validateSearchMapInput(baseInput).length) return [];
@@ -373,6 +417,7 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
                 <option value="8">8</option>
                 <option value="12">12</option>
                 <option value="16">16</option>
+                <option value="terrain">Terrain</option>
               </select>
             </label>
             <label className="field" htmlFor="sm-outto">Out to ring
@@ -381,7 +426,20 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
               </select>
             </label>
           </div>
-          <p className="cap">Segments are ring bands cut into equal sectors around the planning point. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+          {f.sectors === 'terrain' ? (
+            <>
+              <label className="field" htmlFor="sm-area-max">Largest segment (km²)
+                <input id="sm-area-max" inputMode="decimal" value={f.areaMax} onChange={(e) => set('areaMax', e.target.value)} />
+              </label>
+              <p className="cap">
+                Areas A-1, A-2 and so on are cut along streams, lake shores, roads and trails, nearest the planning point first. Any area larger than the limit is halved with a
+                straight line until it fits; adjust those cuts to ridges in CalTopo. The terrain lines are part of this site and are read here; the planning point is not sent anywhere.
+              </p>
+              {terrainNote && <p className="cap" role="status">{terrainNote}</p>}
+            </>
+          ) : (
+            <p className="cap">Segments are ring bands cut into equal sectors around the planning point. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+          )}
 
           <h3>Trail segments</h3>
           <label className="field" htmlFor="sm-trails">Trails file (GPX, or GeoJSON such as a CalTopo export of the trail lines)

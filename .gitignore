@@ -6,3 +6,6 @@ dist/
 # Never commit incident packages or raw data
 data/raw/
 *.incident.json
+
+# Built terrain tiles (scripts/terrain/extract_canvec.py); deployed, not committed
+public/terrain/

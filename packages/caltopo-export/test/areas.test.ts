@@ -94,3 +94,32 @@ describe('splitToSize', () => {
     expect(pieceAreaM2(p)).toBeLessThan(1e6);
   });
 });
+
+describe('search map with terrain area segments', () => {
+  const input = {
+    label: 'EX-area',
+    planningPoint: { ...IPP, kind: 'IPP' as const },
+    rings: [{ percent: 50, distanceKm: 1 }],
+    ringSource: 'test values',
+    areas: { lines: [line([-2000, 0], [2000, 0])], maxAreaM2: 2_000_000, outToPercent: 50, source: 'test streams' },
+  };
+
+  it('adds draft ground assignments A-1 and A-2 in 8 - Unassigned Segments, titles only, source in metadata', async () => {
+    const { buildSearchMap, TEMPLATE_FOLDER_IDS } = await import('../src/index.ts');
+    const map = buildSearchMap(input);
+    const a = map.features.filter((x) => String(x.properties.title).startsWith('A-'));
+    expect(a.map((x) => x.properties.title)).toEqual(['A-1', 'A-2']);
+    for (const x of a) {
+      expect(x.properties).toMatchObject({ class: 'Assignment', status: 'DRAFT', resourceType: 'GROUND', folderId: TEMPLATE_FOLDER_IDS['8 - Unassigned Segments'] });
+      expect(x.properties.description).toBeUndefined();
+    }
+    expect(map.metadata.provenance).toMatch(/Area segments: cut along test streams, at most 2 km² each\./);
+  });
+
+  it('refuses a missing ring, a bad size or no source', async () => {
+    const { validateSearchMapInput } = await import('../src/index.ts');
+    expect(validateSearchMapInput({ ...input, areas: { ...input.areas, outToPercent: 75 } })).toContain('area segments: there is no 75% ring to stop at');
+    expect(validateSearchMapInput({ ...input, areas: { ...input.areas, maxAreaM2: 5 } })).toContain('area segments: largest segment must be 0.01 to 100 km²');
+    expect(validateSearchMapInput({ ...input, areas: { ...input.areas, source: ' ' } })).toContain('area segments: name the source of the terrain lines');
+  });
+});
