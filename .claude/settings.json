@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Netlify__netlify-deploy-services-updater",
+      "mcp__Netlify__netlify-deploy-services-reader",
+      "Bash(curl * https://api.netlify.com/api/v1/sites/454dea0d-c174-4c33-9838-84bfd96dbed0/deploys)",
+      "Bash(curl * https://api.netlify.com/api/v1/deploys/*)"
+    ]
+  }
+}
