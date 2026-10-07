@@ -126,3 +126,22 @@ describe('validateSearchMapInput', () => {
     expect(() => buildSearchMap({ ...INPUT, rings: [] })).toThrow(/at least one range ring/);
   });
 });
+
+describe('segment PODs', () => {
+  const pods = { 'R1-N': { resourceType: 'DOG_TRAIL', responsivePOD: 'HIGH', unresponsivePOD: 'MEDIUM', cluePOD: 'LOW' } } as const;
+
+  it('writes CalTopo POD fields on the named segment only, and notes the source on the IPP', () => {
+    const map = buildSearchMap({ ...INPUT, segmentPods: pods, segmentPodSource: 'test values' });
+    const seg = (n: string) => map.features.find((f) => f.properties.title === n)!.properties;
+    expect(seg('R1-N')).toMatchObject({ resourceType: 'DOG_TRAIL', responsivePOD: 'HIGH', unresponsivePOD: 'MEDIUM', cluePOD: 'LOW', status: 'DRAFT' });
+    expect(seg('R1-NE').responsivePOD).toBeUndefined();
+    expect(seg('R1-NE').resourceType).toBe('GROUND');
+    expect(map.features.find((f) => f.properties.class === 'Marker')!.properties.description).toMatch(/Segment PODs are planned, not achieved: test values/);
+  });
+
+  it('refuses PODs without a source, or with values CalTopo does not use', () => {
+    expect(validateSearchMapInput({ ...INPUT, segmentPods: pods })).toContain('segment PODs need a source line');
+    const bad = { 'R1-N': { ...pods['R1-N'], cluePOD: 'VERY HIGH' } } as never;
+    expect(validateSearchMapInput({ ...INPUT, segmentPods: bad, segmentPodSource: 'x' }).join()).toMatch(/LOW, MEDIUM or HIGH/);
+  });
+});

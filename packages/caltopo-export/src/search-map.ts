@@ -67,7 +67,20 @@ export interface SearchMapInput {
   segments?: { sectors: number; outToPercent: number };
   /** Trail lines from a file the planner supplies, buffered into corridor segments out to a ring. */
   trails?: { lines: LngLat[][]; halfWidthM: number; pieceLengthM: number; outToPercent: number };
+  /** Planned POD per segment name (R1-N, T-3, …), in CalTopo's own fields. Segments not listed keep the defaults. */
+  segmentPods?: Record<string, SegmentPodFields>;
+  /** One line for the IPP note saying where the PODs come from. Required with segmentPods. */
+  segmentPodSource?: string;
 }
+
+export type PodLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+export interface SegmentPodFields {
+  resourceType: string;
+  responsivePOD: PodLevel;
+  unresponsivePOD: PodLevel;
+  cluePOD: PodLevel;
+}
+const POD_LEVELS = new Set(['LOW', 'MEDIUM', 'HIGH']);
 
 export interface CaltopoFeature {
   type: 'Feature';
@@ -186,6 +199,13 @@ export function validateSearchMapInput(input: SearchMapInput): string[] {
     if (!(tr.halfWidthM >= 5 && tr.halfWidthM <= 1000)) errs.push('trails: corridor half-width must be 5 to 1000 m');
     if (!(tr.pieceLengthM >= 100 && tr.pieceLengthM <= 20000)) errs.push('trails: piece length must be 100 m to 20 km');
   }
+  if (input.segmentPods && Object.keys(input.segmentPods).length) {
+    if (!(input.segmentPodSource ?? '').trim()) errs.push('segment PODs need a source line');
+    for (const [name, p] of Object.entries(input.segmentPods)) {
+      if (![p.responsivePOD, p.unresponsivePOD, p.cluePOD].every((v) => POD_LEVELS.has(v))) errs.push(`segment ${name}: POD must be LOW, MEDIUM or HIGH`);
+      if (!/^[A-Z_]{2,20}$/.test(p.resourceType)) errs.push(`segment ${name}: resource type must be a CalTopo type such as GROUND`);
+    }
+  }
   return errs;
 }
 
@@ -219,6 +239,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     `Case: ${input.label}.`,
     `Rings: ${input.ringSource}`,
     input.dispersion?.length ? `Dispersion around ${input.travelBearingDeg}° true: ${input.dispersionSource}` : '',
+    input.segmentPods && Object.keys(input.segmentPods).length ? `Segment PODs are planned, not achieved: ${input.segmentPodSource}` : '',
     input.trails ? `Trail segments: ${input.trails.halfWidthM} m either side of trails from the planner's file, about ${fmtKm(input.trails.pieceLengthM / 1000)} long.` : '',
     `(${GENERATOR_VERSION})`,
   ]
@@ -269,6 +290,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
             letter: name,
             status: 'DRAFT',
             resourceType: 'GROUND',
+            ...input.segmentPods?.[name],
             ...SEGMENT_STYLE,
             folderId: folderIds['8 - Unassigned Segments'],
           },
@@ -285,7 +307,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
         type: 'Feature',
         id: idFor(seed, `trail:${c.name}`),
         geometry: { type: 'Polygon', coordinates: c.rings.map((r) => r.map(coord)) },
-        properties: { class: 'Assignment', title: c.name, letter: c.name, status: 'DRAFT', resourceType: 'GROUND', ...TRAIL_STYLE, folderId: folderIds['8 - Unassigned Segments'] },
+        properties: { class: 'Assignment', title: c.name, letter: c.name, status: 'DRAFT', resourceType: 'GROUND', ...input.segmentPods?.[c.name], ...TRAIL_STYLE, folderId: folderIds['8 - Unassigned Segments'] },
       });
     }
   }

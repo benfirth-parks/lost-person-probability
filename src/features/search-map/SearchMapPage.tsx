@@ -15,6 +15,7 @@ import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/
 import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
 import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
+import { INITIAL_POD_STATE, SegmentPodPanel, segmentPodsFor, type PodState } from './SegmentPodPanel.tsx';
 
 /**
  * Builds a CalTopo search map from incident details: range rings and dispersion
@@ -206,9 +207,19 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [table, setTable] = useState<BehaviourTable>(LPB_TABLE);
   const [trails, setTrails] = useState<TrailFile | null>(null);
   const [trailProblem, setTrailProblem] = useState('');
+  const [podState, setPodState] = useState<PodState>(INITIAL_POD_STATE);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
-  const { input, notes } = useMemo(() => toInput(f, table, trails), [f, table, trails]);
+  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails), [f, table, trails]);
+  // Segment names come from the map without PODs; PODs never change which segments exist.
+  const segmentNames = useMemo(() => {
+    if (validateSearchMapInput(baseInput).length) return [];
+    return buildSearchMap(baseInput).features.filter((x) => x.properties.class === 'Assignment').map((x) => String(x.properties.title));
+  }, [baseInput]);
+  const input = useMemo<SearchMapInput>(() => {
+    const p = segmentPodsFor(podState, segmentNames);
+    return p ? { ...baseInput, segmentPods: p.pods, segmentPodSource: p.source } : baseInput;
+  }, [baseInput, podState, segmentNames]);
   const errors = useMemo(() => {
     const e = validateSearchMapInput(input);
     if (!f.manual && !input.rings.length)
@@ -397,6 +408,8 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
             </label>
           </div>
           <p className="cap">Each trail inside the chosen ring becomes corridor segments T-1, T-2 and so on, cut into pieces of about equal length. The file is read in this browser and goes nowhere else.</p>
+
+          <SegmentPodPanel state={podState} onChange={setPodState} names={segmentNames} />
         </div>
 
         <div className="sm-out">
