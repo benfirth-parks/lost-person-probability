@@ -56,6 +56,8 @@ export interface SearchMapInput {
   planningPoint: LngLat & { kind: 'IPP' | 'LKP' | 'PLS' };
   /** Direction of travel in degrees from true north, when known. Wedges need it. */
   travelBearingDeg?: number;
+  /** Activity category the ring source was looked up for, e.g. "hiker". Recorded on the planning point. */
+  subjectCategory?: string;
   rings: Array<{ percent: number; distanceKm: number }>;
   /** Where the ring distances come from, e.g. a named table and subject category. Required. */
   ringSource: string;
@@ -150,6 +152,8 @@ export function validateSearchMapInput(input: SearchMapInput): string[] {
   // A case label is a place and date, never a person: refuse two capitalised words in a row or digits that look like a phone number.
   if (/\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(input.label) && !/(Lake|Canyon|Creek|River|Mountain|Mount|Peak|Pass|Valley|Trail|Glacier|Falls|Ridge|Park)\b/.test(input.label))
     errs.push('label looks like a person\'s name; use a place and date instead');
+  if (input.subjectCategory !== undefined && !/^[a-z][a-z -]{0,29}$/.test(input.subjectCategory))
+    errs.push('subject category must be a short lower-case activity word such as hiker');
   if (/\d{3}[\s.-]?\d{3}[\s.-]?\d{4}/.test(input.label)) errs.push('label looks like it contains a phone number');
   if (!input.ringSource.trim()) errs.push('ring source is required: name the table and subject category the distances come from');
   if (!input.rings.length) errs.push('at least one range ring is required');
@@ -205,7 +209,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     type: 'Feature',
     id: idFor(seed, 'planning-point'),
     geometry: { type: 'Point', coordinates: coord(pp) },
-    properties: { class: 'Marker', title: pp.kind, description: note(`Planning point for the rings below. Case: ${input.label}.`), 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
+    properties: { class: 'Marker', title: pp.kind, description: note(`Planning point for the rings below. Case: ${input.label}.${input.subjectCategory ? ` Subject category: ${input.subjectCategory}.` : ''}`), 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
   });
 
   for (const r of input.rings) {

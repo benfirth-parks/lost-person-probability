@@ -8,6 +8,15 @@ import {
   type SearchMap,
   type SearchMapInput,
 } from '../../../packages/caltopo-export/src/index.ts';
+import {
+  AI_READER_NOT_APPROVED,
+  LOCAL_READER,
+  readIncident,
+  redactIncidentText,
+  SUBJECT_CATEGORIES,
+  type IntakeFields,
+  type IntakeReader,
+} from '../../../packages/intake/src/index.ts';
 
 /**
  * Builds a CalTopo search map (range rings, dispersion wedges, first-cut
@@ -32,6 +41,7 @@ function toInput(f: FormState): SearchMapInput {
     label: f.label,
     planningPoint: { lat: num(f.lat), lng: num(f.lng), kind: f.kind },
     travelBearingDeg: f.bearing.trim() === '' ? undefined : num(f.bearing),
+    subjectCategory: f.category || undefined,
     rings,
     ringSource: f.ringSource,
     dispersion,
@@ -46,6 +56,7 @@ interface FormState {
   lng: string;
   kind: 'IPP' | 'LKP' | 'PLS';
   bearing: string;
+  category: string;
   rings: Row[];
   ringSource: string;
   dispersion: Row[];
@@ -60,6 +71,7 @@ const INITIAL: FormState = {
   lng: '',
   kind: 'IPP',
   bearing: '',
+  category: '',
   rings: emptyRows(),
   ringSource: '',
   dispersion: emptyRows(),
@@ -93,6 +105,82 @@ function Preview({ map, input }: { map: SearchMap; input: SearchMapInput }) {
       <text x="0" y={-104} textAnchor="middle" className="n">N</text>
       <title>{`North is up. Outer ring ${Math.round(maxR) / 1000} km.`}</title>
     </svg>
+  );
+}
+
+const READERS: IntakeReader[] = [LOCAL_READER, AI_READER_NOT_APPROVED];
+
+const FIELD_LABEL: Record<keyof IntakeFields, string> = {
+  lat: 'Latitude',
+  lng: 'Longitude',
+  pointKind: 'Point',
+  travelBearingDeg: 'Direction of travel',
+  subjectCategory: 'Subject category',
+};
+
+/**
+ * Plain-language intake. The description is cleaned here before any reader sees it,
+ * and the reader's answer only becomes form values when the planner says so.
+ * The description itself is never stored or put in the file.
+ */
+function Intake({ onUse }: { onUse: (fields: IntakeFields) => void }) {
+  const [text, setText] = useState('');
+  const [readerName, setReaderName] = useState(LOCAL_READER.name);
+  const [result, setResult] = useState<{ fields: IntakeFields; discarded: string[] } | null>(null);
+  const [error, setError] = useState('');
+  const reader = READERS.find((r) => r.name === readerName)!;
+  const cleaned = useMemo(() => redactIncidentText(text), [text]);
+  const removedCount = Object.values(cleaned.removed).reduce((a, b) => a + b, 0);
+
+  async function read() {
+    setError('');
+    setResult(null);
+    try {
+      setResult(await readIncident(text, reader));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const entries = result ? (Object.entries(result.fields) as Array<[keyof IntakeFields, unknown]>) : [];
+  return (
+    <div className="sm-intake">
+      <h3>Describe the incident</h3>
+      <label className="field">What happened, in your own words. Leave out names and health details; anything that looks like them is removed before it is read.
+        <textarea rows={4} value={text} onChange={(e) => { setText(e.target.value); setResult(null); }} />
+      </label>
+      <div className="sm-row">
+        <label className="field">Read by
+          <select value={readerName} onChange={(e) => { setReaderName(e.target.value); setResult(null); }}>
+            {READERS.map((r) => <option key={r.name} value={r.name} disabled={!r.enabled}>{r.name}</option>)}
+          </select>
+        </label>
+        <button type="button" onClick={read} disabled={!text.trim() || !reader.enabled}>Read description</button>
+      </div>
+      {text.trim() && (
+        <details className="sm-sent">
+          <summary>What the reader sees{removedCount ? ` (${removedCount} removed)` : ''}</summary>
+          <p>{cleaned.text}</p>
+          <p className="cap">Removed: {cleaned.removed.name} name-like, {cleaned.removed.phone + cleaned.removed.email} contact, {cleaned.removed.health} health. Only the planning point, its kind, the direction of travel and an activity category can come back.</p>
+        </details>
+      )}
+      {error && <p className="cap" role="alert">{error}</p>}
+      {result && (
+        <div className="sm-proposal" aria-live="polite">
+          {entries.length ? (
+            <>
+              <b>Found:</b>
+              <ul>{entries.map(([k, v]) => <li key={k}>{FIELD_LABEL[k]}: {String(v)}{k === 'travelBearingDeg' ? '°' : ''}</li>)}</ul>
+              <button type="button" className="primary" onClick={() => onUse(result.fields)}>Use these in the form</button>
+            </>
+          ) : (
+            <p>Nothing usable found. Fill the form below.</p>
+          )}
+          {result.discarded.length > 0 && <p className="cap">Ignored: {result.discarded.join(', ')}.</p>}
+          <p className="cap">Ring distances and dispersion angles never come from the description. Enter them below with their source.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -152,6 +240,18 @@ export function SearchMapPage() {
       </p>
       <div className="sm-grid">
         <div className="sm-form">
+          <Intake
+            onUse={(x) =>
+              setF((cur) => ({
+                ...cur,
+                lat: x.lat !== undefined ? String(x.lat) : cur.lat,
+                lng: x.lng !== undefined ? String(x.lng) : cur.lng,
+                kind: x.pointKind ?? cur.kind,
+                bearing: x.travelBearingDeg !== undefined ? String(x.travelBearingDeg) : cur.bearing,
+                category: x.subjectCategory ?? cur.category,
+              }))
+            }
+          />
           <label className="field">Case label (place and date, no names)
             <input value={f.label} maxLength={40} placeholder="e.g. Aurora Lake 2026-07-18" onChange={(e) => set('label', e.target.value)} />
           </label>
@@ -172,6 +272,13 @@ export function SearchMapPage() {
           </div>
           <label className="field">Direction of travel (degrees true, needed for dispersion wedges)
             <input inputMode="decimal" value={f.bearing} placeholder="leave blank if unknown" onChange={(e) => set('bearing', e.target.value)} />
+          </label>
+
+          <label className="field">Subject category (the one your ring source was looked up for)
+            <select value={f.category} onChange={(e) => set('category', e.target.value)}>
+              <option value="">Not set</option>
+              {SUBJECT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
           </label>
 
           <h3>Range rings</h3>

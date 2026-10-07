@@ -193,3 +193,9 @@ main { min-width: 0; }
 .sm-preview .seg { fill: rgba(25, 113, 194, 0.06); stroke: #1971c2; stroke-width: 0.35; }
 .sm-preview .pp { fill: currentColor; }
 .sm-preview .n { font-size: 7px; fill: currentColor; }
+.sm-intake { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; }
+.sm-intake h3 { margin: 0; }
+.sm-intake textarea { width: 100%; font: inherit; }
+.sm-intake .sm-row { align-items: end; }
+.sm-sent p { margin: 6px 0 0; font-size: 0.85rem; white-space: pre-wrap; }
+.sm-proposal ul { margin: 4px 0 8px; padding-left: 18px; }
