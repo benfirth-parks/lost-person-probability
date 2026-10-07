@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react';
 import { categories, LPB_CATEGORIES, LPB_TABLE, lookupBehaviour, PERCENTILES, terrains, type BehaviourTable } from '../../../packages/behaviour/src/index.ts';
 import {
   buildSearchMap,
+  DEFAULT_TRAIL_OPTIONS,
   distanceM,
   GENERATOR_VERSION,
+  parseTrailFile,
   searchMapFileName,
   validateSearchMapInput,
   type SearchMap,
@@ -13,6 +15,7 @@ import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/
 import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
 import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
+import { INITIAL_POD_STATE, SegmentPodPanel, segmentPodsFor, type PodState } from './SegmentPodPanel.tsx';
 
 /**
  * Builds a CalTopo search map from incident details: range rings and dispersion
@@ -45,6 +48,17 @@ interface FormState {
   dispersionSource: string;
   sectors: string;
   outTo: string;
+  /** Trail corridor half-width (m), piece length (km) and the ring they stop at. */
+  trailWidth: string;
+  trailPiece: string;
+  trailOutTo: string;
+}
+
+/** Trail lines read from the planner's file. Kept in memory only. */
+interface TrailFile {
+  name: string;
+  lines: { lng: number; lat: number }[][];
+  skipped: number;
 }
 
 const INITIAL: FormState = {
@@ -61,9 +75,12 @@ const INITIAL: FormState = {
   dispersionSource: '',
   sectors: '8',
   outTo: '75',
+  trailWidth: String(DEFAULT_TRAIL_OPTIONS.halfWidthM),
+  trailPiece: String(DEFAULT_TRAIL_OPTIONS.pieceLengthM / 1000),
+  trailOutTo: '75',
 };
 
-function toInput(f: FormState, table: BehaviourTable): { input: SearchMapInput; notes: string[] } {
+function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null): { input: SearchMapInput; notes: string[] } {
   const notes: string[] = [];
   const parsed = parseCoordinate(f.coord);
   const bearing = f.bearing.trim() === '' ? undefined : num(f.bearing);
@@ -101,6 +118,9 @@ function toInput(f: FormState, table: BehaviourTable): { input: SearchMapInput; 
       dispersion,
       dispersionSource,
       segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
+      trails: trails?.lines.length
+        ? { lines: trails.lines, halfWidthM: num(f.trailWidth), pieceLengthM: num(f.trailPiece) * 1000, outToPercent: num(f.trailOutTo) }
+        : undefined,
     },
   };
 }
@@ -120,7 +140,7 @@ function Preview({ map, input }: { map: SearchMap; input: SearchMapInput }) {
     <svg className="sm-preview" viewBox="-110 -110 220 220" role="img" aria-label="Preview of rings, wedges and segments around the planning point">
       {map.features.map((f) => {
         if (f.geometry?.type === 'Polygon') {
-          const cls = f.properties.class === 'Assignment' ? 'seg' : 'wedge';
+          const cls = f.properties.class !== 'Assignment' ? 'wedge' : String(f.properties.title).startsWith('T-') ? 'trail' : 'seg';
           return <polygon key={f.id} className={cls} points={f.geometry.coordinates[0]!.map(toXY).join(' ')} />;
         }
         if (f.geometry?.type === 'LineString') return <polyline key={f.id} className="ring" points={f.geometry.coordinates.map(toXY).join(' ')} />;
@@ -185,9 +205,21 @@ function LookedUp({ input }: { input: SearchMapInput }) {
 export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const [f, setF] = useState<FormState>(INITIAL);
   const [table, setTable] = useState<BehaviourTable>(LPB_TABLE);
+  const [trails, setTrails] = useState<TrailFile | null>(null);
+  const [trailProblem, setTrailProblem] = useState('');
+  const [podState, setPodState] = useState<PodState>(INITIAL_POD_STATE);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const coord = useMemo(() => (f.coord.trim() ? parseCoordinate(f.coord) : null), [f.coord]);
-  const { input, notes } = useMemo(() => toInput(f, table), [f, table]);
+  const { input: baseInput, notes } = useMemo(() => toInput(f, table, trails), [f, table, trails]);
+  // Segment names come from the map without PODs; PODs never change which segments exist.
+  const segmentNames = useMemo(() => {
+    if (validateSearchMapInput(baseInput).length) return [];
+    return buildSearchMap(baseInput).features.filter((x) => x.properties.class === 'Assignment').map((x) => String(x.properties.title));
+  }, [baseInput]);
+  const input = useMemo<SearchMapInput>(() => {
+    const p = segmentPodsFor(podState, segmentNames);
+    return p ? { ...baseInput, segmentPods: p.pods, segmentPodSource: p.source } : baseInput;
+  }, [baseInput, podState, segmentNames]);
   const errors = useMemo(() => {
     const e = validateSearchMapInput(input);
     if (!f.manual && !input.rings.length)
@@ -202,8 +234,22 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
   const counts = map && {
     rings: map.features.filter((x) => x.geometry?.type === 'LineString').length,
     wedges: map.features.filter((x) => x.geometry?.type === 'Polygon' && x.properties.class === 'Shape').length,
-    segments: map.features.filter((x) => x.properties.class === 'Assignment').length,
+    segments: map.features.filter((x) => x.properties.class === 'Assignment' && !String(x.properties.title).startsWith('T-')).length,
+    trails: map.features.filter((x) => x.properties.class === 'Assignment' && String(x.properties.title).startsWith('T-')).length,
   };
+
+  async function readTrails(file: File | undefined) {
+    if (!file) return;
+    try {
+      const r = parseTrailFile(await file.text());
+      if (!r.lines.length) throw new Error('no trail lines found in the file');
+      setTrails({ name: file.name, ...r });
+      setTrailProblem('');
+    } catch (e) {
+      setTrails(null);
+      setTrailProblem(`${file.name}: ${(e as Error).message}`);
+    }
+  }
   const withFigures = categories(table);
   // The book's full category list stays visible, so a missing category reads as "no figures yet" rather than as absent.
   const cats = [...new Set([...withFigures, ...(table === LPB_TABLE ? LPB_CATEGORIES : [])])];
@@ -336,13 +382,41 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
             </label>
           </div>
           <p className="cap">Segments are ring bands cut into equal sectors around the planning point. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+
+          <h3>Trail segments</h3>
+          <label className="field" htmlFor="sm-trails">Trails file (GPX, or GeoJSON such as a CalTopo export of the trail lines)
+            <input id="sm-trails" type="file" accept=".gpx,.json,.geojson,application/gpx+xml,application/geo+json,application/json" onChange={(e) => readTrails(e.target.files?.[0])} />
+          </label>
+          {trails && (
+            <p className="cap">
+              {trails.name}: {trails.lines.length} {trails.lines.length === 1 ? 'line' : 'lines'}{trails.skipped ? `, ${trails.skipped} other features skipped` : ''}.{' '}
+              <button type="button" className="link" onClick={() => setTrails(null)}>Remove</button>
+            </p>
+          )}
+          {trailProblem && <p className="sm-doc-bad" role="alert">{trailProblem}</p>}
+          <div className="sm-row">
+            <label className="field" htmlFor="sm-trail-width">Metres either side
+              <input id="sm-trail-width" inputMode="numeric" value={f.trailWidth} onChange={(e) => set('trailWidth', e.target.value)} />
+            </label>
+            <label className="field" htmlFor="sm-trail-piece">Piece length (km)
+              <input id="sm-trail-piece" inputMode="decimal" value={f.trailPiece} onChange={(e) => set('trailPiece', e.target.value)} />
+            </label>
+            <label className="field" htmlFor="sm-trail-outto">Out to ring
+              <select id="sm-trail-outto" value={f.trailOutTo} onChange={(e) => set('trailOutTo', e.target.value)}>
+                {PERCENTS.map((p) => <option key={p} value={p}>{p}%</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="cap">Each trail inside the chosen ring becomes corridor segments T-1, T-2 and so on, cut into pieces of about equal length. The file is read in this browser and goes nowhere else.</p>
+
+          <SegmentPodPanel state={podState} onChange={setPodState} names={segmentNames} />
         </div>
 
         <div className="sm-out">
           {map && counts ? (
             <>
               <Preview map={map} input={input} />
-              <p className="meta">{counts.rings} rings · {counts.wedges} wedges · {counts.segments} segments · {GENERATOR_VERSION}</p>
+              <p className="meta">{counts.rings} rings · {counts.wedges} wedges · {counts.segments} segments{counts.trails ? ` · ${counts.trails} trail segments` : ''} · {GENERATOR_VERSION}</p>
               {table.kind === 'exercise' && !f.manual && <p className="sm-exercise">Exercise values. Load a behaviour table from a real source before using these rings for anything but training.</p>}
               <button className="primary" onClick={download}>Download CalTopo file</button>
               <p className="cap">In CalTopo, use Import on the map and choose this file. Rings, wedges and segments carry titles only; the IPP marker holds one note with the training mode and the sources.</p>
