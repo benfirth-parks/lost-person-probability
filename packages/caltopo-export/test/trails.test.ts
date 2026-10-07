@@ -175,7 +175,7 @@ describe('search map with trails', () => {
     trails: { lines: [[IPP, f.toLngLat({ x: 0, y: 3000 })]], halfWidthM: 50, pieceLengthM: 1000, outToPercent: 50 },
   };
 
-  it('adds draft ground assignments T-1, T-2 in 8 - Unassigned Segments and notes the width on the IPP', () => {
+  it('adds draft ground assignments T-1, T-2 in 8 - Unassigned Segments and notes the width in the file metadata', () => {
     const map = buildSearchMap(input);
     const t = map.features.filter((x) => String(x.properties.title).startsWith('T-'));
     expect(t.map((x) => x.properties.title)).toEqual(['T-1', 'T-2']);
@@ -184,8 +184,8 @@ describe('search map with trails', () => {
       expect(x.properties.description).toBeUndefined();
       expect(x.geometry?.type).toBe('Polygon');
     }
-    const ipp = map.features.find((x) => x.properties.class === 'Marker')!;
-    expect(ipp.properties.description).toMatch(/Trail segments: 50 m either side/);
+    expect(map.features.find((x) => x.properties.class === 'Marker')!.properties.description).toBeUndefined();
+    expect(map.metadata.provenance).toMatch(/Trail segments: 50 m either side/);
   });
 
   it('refuses a trail cut-off ring that does not exist', () => {

@@ -69,7 +69,7 @@ export interface SearchMapInput {
   trails?: { lines: LngLat[][]; halfWidthM: number; pieceLengthM: number; outToPercent: number };
   /** Planned POD per segment name (R1-N, T-3, …), in CalTopo's own fields. Segments not listed keep the defaults. */
   segmentPods?: Record<string, SegmentPodFields>;
-  /** One line for the IPP note saying where the PODs come from. Required with segmentPods. */
+  /** One line for the file metadata saying where the PODs come from. Required with segmentPods. */
   segmentPodSource?: string;
 }
 
@@ -91,6 +91,8 @@ export interface CaltopoFeature {
 
 export interface SearchMap {
   type: 'FeatureCollection';
+  /** Mode, case, sources and generator version. Kept off the map features so CalTopo shows no notes; CalTopo ignores it on import. */
+  metadata: { provenance: string };
   features: CaltopoFeature[];
 }
 
@@ -233,7 +235,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     properties: { class: 'Folder', title, visible: FOLDER_VISIBLE.has(title), labelVisible: true },
   }));
   const pp = input.planningPoint;
-  // One note for the whole map, on the planning point; rings, wedges and segments carry no text of their own.
+  // One note for the whole file, outside the features: no map feature carries a description.
   const provenance = [
     MODE_NOTE,
     `Case: ${input.label}.`,
@@ -250,7 +252,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     type: 'Feature',
     id: idFor(seed, 'planning-point'),
     geometry: { type: 'Point', coordinates: coord(pp) },
-    properties: { class: 'Marker', title: pp.kind, description: provenance, 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
+    properties: { class: 'Marker', title: pp.kind, 'marker-symbol': 'cp', 'marker-color': '#ff0000', 'marker-size': 1, 'marker-rotation': 0, folderId: folderIds['1 - Important Points'] },
   });
 
   for (const r of input.rings) {
@@ -312,7 +314,7 @@ export function buildSearchMap(input: SearchMapInput): SearchMap {
     }
   }
 
-  return { type: 'FeatureCollection', features };
+  return { type: 'FeatureCollection', metadata: { provenance }, features };
 }
 
 /** File name with the mode in it, as the brief requires for exports. */
