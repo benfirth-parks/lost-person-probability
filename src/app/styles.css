@@ -191,6 +191,7 @@ main { min-width: 0; }
 .sm-preview .ring { fill: none; stroke: #d6336c; stroke-width: 0.7; }
 .sm-preview .wedge { fill: rgba(245, 159, 0, 0.18); stroke: #f59f00; stroke-width: 0.5; }
 .sm-preview .seg { fill: rgba(25, 113, 194, 0.06); stroke: #1971c2; stroke-width: 0.35; }
+.sm-preview .trail { fill: rgba(47, 158, 68, 0.35); stroke: #2f9e44; stroke-width: 0.4; }
 .sm-preview .pp { fill: currentColor; }
 .sm-preview .n { font-size: 7px; fill: currentColor; }
 .sm-intake { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 8px; }
