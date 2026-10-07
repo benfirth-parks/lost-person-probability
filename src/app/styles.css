@@ -219,6 +219,10 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); tex
 .sm-table-load code { font-size: 0.75rem; overflow-wrap: anywhere; }
 .sm-exercise { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--mode-bg); color: var(--mode); font-size: 0.82rem; }
 .sm-check { display: flex; gap: .5rem; align-items: center; margin: .25rem 0 .5rem; }
+.sm-bands { display: flex; flex-wrap: wrap; gap: 0 1rem; border: 0; padding: 0; margin: .25rem 0; }
+.sm-bands legend { padding: 0; font-size: .9em; }
+.sm-bands .sm-check { margin: .2rem 0; }
+.sm-bands:disabled { opacity: .5; }
 .sm-pod-defaults { align-items: center; flex-wrap: wrap; gap: .4rem; }
 .sm-pod-table-wrap { max-height: 22rem; overflow: auto; border: 1px solid var(--line, rgba(127,127,127,.3)); border-radius: 6px; }
 .sm-pod-table { width: 100%; border-collapse: collapse; font-size: .85rem; }

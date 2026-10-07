@@ -17,7 +17,7 @@ const INPUT: SearchMapInput = {
   ringSource: 'test values',
   dispersion: [{ percent: 25, angleDeg: 90 }, { percent: 50, angleDeg: 120 }],
   dispersionSource: 'test values',
-  segments: { sectors: 8, outToPercent: 75 },
+  segments: { sectors: 8, inRings: [25, 50, 75] },
 };
 const pt = (c: number[]) => ({ lng: c[0]!, lat: c[1]! });
 
@@ -87,6 +87,23 @@ describe('buildSearchMap', () => {
     expect(segs).toHaveLength(24);
     expect(segs[0]!.properties).toMatchObject({ title: 'R1-N', status: 'DRAFT', resourceType: 'GROUND' });
     expect(segs.map((s) => s.properties.title)).toContain('R3-SW');
+  });
+
+  it('cuts only the chosen ring bands, keeping each band its ring number: 50–75% and 75–95% give R3 and R4, 16 segments', () => {
+    const map = buildSearchMap({ ...INPUT, segments: { sectors: 8, inRings: [75, 95] } });
+    const names = map.features.filter((f) => f.properties.class === 'Assignment').map((f) => String(f.properties.title));
+    expect(names).toHaveLength(16);
+    expect(new Set(names.map((n) => n.split('-')[0]))).toEqual(new Set(['R3', 'R4']));
+    // R3-N runs from the 50% ring (2 km) out to the 75% ring (4 km).
+    const r3n = map.features.find((f) => f.properties.title === 'R3-N')!;
+    const d = (r3n.geometry as { coordinates: number[][][] }).coordinates[0]!.map((c) => distanceM(IPP, pt(c)));
+    expect(Math.min(...d)).toBeCloseTo(2000, 0);
+    expect(Math.max(...d)).toBeCloseTo(4000, 0);
+  });
+
+  it('refuses ring bands that are missing or not chosen at all', () => {
+    expect(validateSearchMapInput({ ...INPUT, segments: { sectors: 8, inRings: [] } })).toContain('segments: choose at least one ring band');
+    expect(validateSearchMapInput({ ...INPUT, segments: { sectors: 8, inRings: [60] } })).toContain('segments: there is no 60% ring band');
   });
 
   it('gives the same file for the same input', () => {

@@ -47,11 +47,12 @@ interface FormState {
   dispersion: Row[];
   dispersionSource: string;
   sectors: string;
-  outTo: string;
-  /** Trail corridor half-width (m), piece length (km) and the ring they stop at. */
+  /** Ring bands that get sector segments, by the outer ring's percent. */
+  segRings: string[];
+  /** Trail corridor half-width (m), piece length (km) and the ring bands they cover. */
   trailWidth: string;
   trailPiece: string;
-  trailOutTo: string;
+  trailRings: string[];
 }
 
 /** Trail lines read from the planner's file. Kept in memory only. */
@@ -74,10 +75,10 @@ const INITIAL: FormState = {
   dispersion: emptyRows(),
   dispersionSource: '',
   sectors: '8',
-  outTo: '75',
+  segRings: ['25', '50', '75'],
   trailWidth: String(DEFAULT_TRAIL_OPTIONS.halfWidthM),
   trailPiece: String(DEFAULT_TRAIL_OPTIONS.pieceLengthM / 1000),
-  trailOutTo: '75',
+  trailRings: ['25', '50', '75'],
 };
 
 function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null): { input: SearchMapInput; notes: string[] } {
@@ -117,9 +118,9 @@ function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null):
       ringSource,
       dispersion,
       dispersionSource,
-      segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), outToPercent: num(f.outTo) },
+      segments: f.sectors === '0' ? undefined : { sectors: Number(f.sectors), inRings: f.segRings.map(num) },
       trails: trails?.lines.length
-        ? { lines: trails.lines, halfWidthM: num(f.trailWidth), pieceLengthM: num(f.trailPiece) * 1000, outToPercent: num(f.trailOutTo) }
+        ? { lines: trails.lines, halfWidthM: num(f.trailWidth), pieceLengthM: num(f.trailPiece) * 1000, inRings: f.trailRings.map(num) }
         : undefined,
     },
   };
@@ -175,6 +176,25 @@ function RowsTable({ rows, onChange, unit, label }: { rows: Row[]; onChange: (ro
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Tick boxes for the ring bands a kind of segment covers. A band is named by its outer ring. */
+function RingBands({ id, chosen, onChange, disabled }: { id: string; chosen: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  return (
+    <fieldset className="sm-bands" id={id} disabled={disabled}>
+      <legend>In ring bands</legend>
+      {PERCENTS.map((p, i) => (
+        <label key={p} className="sm-check">
+          <input
+            type="checkbox"
+            checked={chosen.includes(p)}
+            onChange={(e) => onChange(e.target.checked ? PERCENTS.filter((q) => q === p || chosen.includes(q)) : chosen.filter((q) => q !== p))}
+          />
+          {i === 0 ? `0 to ${p}%` : `${PERCENTS[i - 1]} to ${p}%`}
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
@@ -375,13 +395,9 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
                 <option value="16">16</option>
               </select>
             </label>
-            <label className="field" htmlFor="sm-outto">Out to ring
-              <select id="sm-outto" value={f.outTo} onChange={(e) => set('outTo', e.target.value)} disabled={f.sectors === '0'}>
-                {PERCENTS.map((p) => <option key={p} value={p}>{p}%</option>)}
-              </select>
-            </label>
           </div>
-          <p className="cap">Segments are ring bands cut into equal sectors around the planning point. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
+          <RingBands id="sm-seg-rings" chosen={f.segRings} onChange={(v) => set('segRings', v)} disabled={f.sectors === '0'} />
+          <p className="cap">Segments are ring bands cut into equal sectors around the planning point, in the bands you tick. They are a starting grid: adjust them to trails, drainages and ridges in CalTopo before assigning.</p>
 
           <h3>Trail segments</h3>
           <label className="field" htmlFor="sm-trails">Trails file (GPX, or GeoJSON such as a CalTopo export of the trail lines)
@@ -401,13 +417,9 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
             <label className="field" htmlFor="sm-trail-piece">Piece length (km)
               <input id="sm-trail-piece" inputMode="decimal" value={f.trailPiece} onChange={(e) => set('trailPiece', e.target.value)} />
             </label>
-            <label className="field" htmlFor="sm-trail-outto">Out to ring
-              <select id="sm-trail-outto" value={f.trailOutTo} onChange={(e) => set('trailOutTo', e.target.value)}>
-                {PERCENTS.map((p) => <option key={p} value={p}>{p}%</option>)}
-              </select>
-            </label>
           </div>
-          <p className="cap">Each trail inside the chosen ring becomes corridor segments T-1, T-2 and so on, cut into pieces of about equal length. The file is read in this browser and goes nowhere else.</p>
+          <RingBands id="sm-trail-rings" chosen={f.trailRings} onChange={(v) => set('trailRings', v)} />
+          <p className="cap">Trail inside the ticked ring bands becomes corridor segments T-1, T-2 and so on, cut into pieces of about equal length. Trails drawn in several parts are joined end to end first. The file is read in this browser and goes nowhere else.</p>
 
           <SegmentPodPanel state={podState} onChange={setPodState} names={segmentNames} />
         </div>
