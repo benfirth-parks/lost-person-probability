@@ -31,6 +31,11 @@ describe('redactIncidentText', () => {
     expect(redactIncidentText('Call 403-555-0142.').text).toBe('Call [contact].');
   });
 
+  it('keeps an ordinary word at the start of a sentence when it also appears in lower case', () => {
+    expect(redactIncidentText('Ascending the slope. Then ascending again.').text).toBe('Ascending the slope. Then ascending again.');
+    expect(redactIncidentText('Heading northeast from the lot.').text).toBe('Heading northeast from the lot.');
+  });
+
   it('does not mistake UTM numbers or coordinates for phone numbers', () => {
     expect(redactIncidentText('11U 594123 5677123').removed.phone).toBe(0);
     expect(redactIncidentText('49.0512, -113.9150').removed.phone).toBe(0);
@@ -78,7 +83,7 @@ describe('readIncident', () => {
 
   it('the local reader finds the point, direction and activity', async () => {
     const r = await readIncident(TEXT, LOCAL_READER);
-    expect(r.fields).toEqual({ lat: 51.2034, lng: -115.612, travelBearingDeg: 45, subjectCategory: 'hiker' });
+    expect(r.fields).toEqual({ lat: 51.2034, lng: -115.612, travelBearingDeg: 45, subjectCategory: 'hiker', terrain: 'mountainous' });
     expect(r.discarded).toEqual([]);
   });
 
