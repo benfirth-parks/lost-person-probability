@@ -3,7 +3,6 @@ import { categories, LPB_CATEGORIES, LPB_TABLE, lookupBehaviour, PERCENTILES, te
 import {
   buildSearchMap,
   DEFAULT_TRAIL_OPTIONS,
-  distanceM,
   GENERATOR_VERSION,
   parseTrailFile,
   searchMapFileName,
@@ -15,6 +14,7 @@ import { formatLatLng, parseCoordinate } from '../../../packages/geospatial/src/
 import type { IntakeFields, IntakeReader } from '../../../packages/intake/src/index.ts';
 import { BehaviourTablePanel } from './BehaviourTablePanel.tsx';
 import { Intake } from './Intake.tsx';
+import { MapPreview } from './MapPreview.tsx';
 import { insideCoverage, loadRidgeIndex, loadRidgePolygons, type RidgePolygons } from './ridges.ts';
 import { INITIAL_POD_STATE, SegmentPodPanel, segmentPodsFor, type PodState } from './SegmentPodPanel.tsx';
 
@@ -127,34 +127,6 @@ function toInput(f: FormState, table: BehaviourTable, trails: TrailFile | null, 
         : undefined,
     },
   };
-}
-
-/** Plan view in metres around the planning point, for a quick check before download. */
-function Preview({ map, input }: { map: SearchMap; input: SearchMapInput }) {
-  const pp = input.planningPoint;
-  const maxR = Math.max(...input.rings.map((r) => r.distanceKm * 1000));
-  const toXY = (c: number[]) => {
-    const p = { lng: c[0]!, lat: c[1]! };
-    const d = distanceM(pp, p);
-    const dx = distanceM(pp, { lng: p.lng, lat: pp.lat }) * Math.sign(p.lng - pp.lng);
-    const dy = Math.sign(p.lat - pp.lat) * Math.sqrt(Math.max(0, d * d - dx * dx));
-    return `${(dx / maxR) * 100},${(-dy / maxR) * 100}`;
-  };
-  return (
-    <svg className="sm-preview" viewBox="-110 -110 220 220" role="img" aria-label="Preview of rings, wedges and segments around the planning point">
-      {map.features.map((f) => {
-        if (f.geometry?.type === 'Polygon') {
-          const cls = f.properties.class !== 'Assignment' ? 'wedge' : String(f.properties.title).startsWith('T-') ? 'trail' : 'seg';
-          return <polygon key={f.id} className={cls} points={f.geometry.coordinates[0]!.map(toXY).join(' ')} />;
-        }
-        if (f.geometry?.type === 'LineString') return <polyline key={f.id} className="ring" points={f.geometry.coordinates.map(toXY).join(' ')} />;
-        return null;
-      })}
-      <circle cx="0" cy="0" r="2.2" className="pp" />
-      <text x="0" y={-104} textAnchor="middle" className="n">N</text>
-      <title>{`North is up. Outer ring ${Math.round(maxR) / 1000} km.`}</title>
-    </svg>
-  );
 }
 
 function RowsTable({ rows, onChange, unit, label }: { rows: Row[]; onChange: (rows: Row[]) => void; unit: string; label: string }) {
@@ -476,7 +448,7 @@ export function SearchMapPage({ readers }: { readers?: IntakeReader[] } = {}) {
         <div className="sm-out">
           {map && counts ? (
             <>
-              <Preview map={map} input={input} />
+              <MapPreview map={map} input={input} />
               <p className="meta">{counts.rings} rings · {counts.wedges} wedges · {counts.segments} segments{counts.trails ? ` · ${counts.trails} trail segments` : ''} · {GENERATOR_VERSION}</p>
               {table.kind === 'exercise' && !f.manual && <p className="sm-exercise">Exercise values. Load a behaviour table from a real source before using these rings for anything but training.</p>}
               <button className="primary" onClick={download}>Download CalTopo file</button>
