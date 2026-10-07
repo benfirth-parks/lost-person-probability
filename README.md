@@ -16,6 +16,7 @@ The authoritative brief is `lost-person-mapper-build.md` in the project files. `
 | `packages/domain` | Dependency-free SHA-256 and canonical JSON for input hashes |
 | `supabase/migrations` | PostGIS schema for the canonical tables, immutability triggers, row-level security, audit log, and the lock/reveal functions |
 | `supabase/tests` | Role-by-role access, leakage and immutability tests |
+| `packages/importers` | File import of CalTopo GeoJSON exports and GPX tracks. Parsed locally, free text dropped, every skipped feature reported with a reason |
 | `packages/exercises` | ALPINE-EX-01, an authored training exercise on synthetic terrain (exercise values only) |
 | `server/`, `netlify/functions/api.ts` | `/api/v1` on Netlify Functions: commit surfaces, history, rollback, evaluation create, leakage check, lock, reveal, results. Queries run as the signed-in user so RLS applies; find locations are AES-256-GCM encrypted with the incident id bound in |
 | `src/` | React + MapLibre app: cases list, map workspace (scenarios, clues, search and POD, history, evaluate), read-only administration. Runs on an in-browser training data source until Supabase is configured; no external tiles, fonts or requests |

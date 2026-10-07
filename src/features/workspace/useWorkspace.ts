@@ -9,6 +9,8 @@ import {
   type SurfaceRecord,
 } from '../../../packages/probability-engine/src/index.ts';
 import { CASE_CODE, EXERCISE_RINGS, INFORMATION_CUTOFF, SEALED_OUTCOME } from '../../../packages/exercises/alpine-ex-01.ts';
+import type { ImportResult } from '../../../packages/importers/src/index.ts';
+import type { ImportPairing } from './model.ts';
 import { buildPrior, DEFAULT_SCENARIOS, ringsPrior, uniformBaseline, type PriorConfig, type Preview } from './model.ts';
 
 export type Role = 'planner_trainee' | 'evaluator';
@@ -31,6 +33,8 @@ interface State {
   lastPod: Float64Array | null;
   priorCfg: PriorConfig;
   toast: { text: string; bad: boolean; n: number } | null;
+  /** Last search file imported in this session. Parsed in the browser; never uploaded. */
+  imported: { fileName: string; result: ImportResult; pairs: Record<string, ImportPairing> } | null;
 }
 
 function commitTo(store: SurfaceStore, p: Preview, parent: string | null, user: string, rationale: string): SurfaceRecord {
@@ -52,7 +56,7 @@ function initial(): State {
   const store = new SurfaceStore('training');
   const priorCfg: PriorConfig = { scenarios: DEFAULT_SCENARIOS.map((s) => ({ ...s })), rings: EXERCISE_RINGS, routeConfidence: 0.6 };
   const rec = commitTo(store, buildPrior(priorCfg), null, USERS.planner_trainee, 'Initial scenario prior for exercise briefing');
-  return { store, role: 'planner_trainee', headId: rec.id, viewId: rec.id, preview: null, run: null, revealed: null, applied: [], lastPod: null, priorCfg, toast: null };
+  return { store, role: 'planner_trainee', headId: rec.id, viewId: rec.id, preview: null, run: null, revealed: null, applied: [], lastPod: null, priorCfg, toast: null, imported: null };
 }
 
 export function useWorkspaceState() {
@@ -68,6 +72,7 @@ export function useWorkspaceState() {
       setRole: (role: Role) => patch({ role }),
       setPriorCfg: (priorCfg: PriorConfig) => patch({ priorCfg }),
       setPreview: (preview: Preview | null) => patch({ preview }),
+      setImported: (imported: State['imported']) => patch({ imported }),
       view: (viewId: string) => patch({ viewId, preview: null }),
       toast,
       commit: (rationale: string) => {

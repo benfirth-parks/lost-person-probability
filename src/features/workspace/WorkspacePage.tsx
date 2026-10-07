@@ -4,6 +4,7 @@ import { cliffCell, elevation, grid, landMask, zoneOf, ZONES } from '../../../pa
 import { pct, prob } from './format.ts';
 import { MapView, type Layers } from './MapView.tsx';
 import { availableAssignments, availableClues, CluesPanel, EvaluatePanel, HistoryPanel, PreviewCard, ScenariosPanel, SearchPanel } from './Panels.tsx';
+import { importedAssignments } from './model.ts';
 import { DECADES, RAMP_CSS } from './raster.ts';
 import { useWorkspace } from './useWorkspace.ts';
 
@@ -87,7 +88,8 @@ export function WorkspacePage() {
   const [cell, setCell] = useState(-1);
   const [max, setMax] = useState(0);
   const clues = useMemo(availableClues, []);
-  const assignments = useMemo(availableAssignments, []);
+  const exerciseAssignments = useMemo(availableAssignments, []);
+  const assignments = useMemo(() => [...exerciseAssignments, ...importedAssignments(w.imported)], [exerciseAssignments, w.imported]);
   useEffect(() => {
     try {
       localStorage.setItem('lpm-tab', tab);
