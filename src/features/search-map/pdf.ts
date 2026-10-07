@@ -15,7 +15,15 @@ function load() {
   return ready;
 }
 
-export async function pdfText(bytes: Uint8Array): Promise<string> {
+/** Gives up rather than hanging when the browser refuses to start the PDF worker. */
+export function pdfText(bytes: Uint8Array, timeoutMs = 30_000): Promise<string> {
+  return Promise.race([
+    readPdf(bytes),
+    new Promise<string>((_, reject) => setTimeout(() => reject(new Error('PDF reading did not finish here. Copy the text into the notes instead.')), timeoutMs)),
+  ]);
+}
+
+async function readPdf(bytes: Uint8Array): Promise<string> {
   const pdfjs = await load();
   const task = pdfjs.getDocument({ data: bytes, disableFontFace: true });
   const doc = await task.promise;
