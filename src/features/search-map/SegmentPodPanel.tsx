@@ -37,7 +37,7 @@ export function planFor(s: PodState, name: string): SegmentPlan {
   return { ...s.defaults, ...s.overrides[name] };
 }
 
-/** CalTopo fields for every named segment, plus the source line for the IPP note. */
+/** CalTopo fields for every named segment, plus the source line for the file metadata. */
 export function segmentPodsFor(s: PodState, names: string[]): { pods: Record<string, SegmentPodFields>; source: string } | null {
   if (!s.enabled || !names.length) return null;
   const pods: Record<string, SegmentPodFields> = {};
