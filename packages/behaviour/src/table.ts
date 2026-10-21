@@ -32,6 +32,10 @@ export const BehaviourEntry = z
       .optional(),
     /** Cases behind the dispersion angles, which the source may count separately from the distances. */
     dispersionN: z.number().int().positive().optional(),
+    /** The source's own column heading when it differs from `terrain` (e.g. "temperate non-mtn", "dry, all"). */
+    column: z.string().trim().min(1).max(40).optional(),
+    /** Where in the source this row is printed (chapter, table, page), added to the table's citation. */
+    ref: z.string().trim().min(1).max(160).optional(),
   })
   .strict();
 export type BehaviourEntry = z.infer<typeof BehaviourEntry>;
@@ -83,7 +87,9 @@ export function lookupBehaviour(table: BehaviourTable, category: string, terrain
   const n = entry.n ? `, n=${entry.n}` : '';
   const dn = entry.dispersionDeg && entry.dispersionN ? `; dispersion n=${entry.dispersionN}` : '';
   const label = table.kind === 'exercise' ? `${table.name} (exercise values, not research data)` : table.name;
-  return { entry, terrainFallback: !exact, citation: `${label}: ${entry.category}, ${entry.terrain}${n}${dn}. Source: ${table.source}` };
+  const col = entry.column ? ` (printed as "${entry.column}")` : '';
+  const ref = entry.ref ? ` ${entry.ref}` : '';
+  return { entry, terrainFallback: !exact, citation: `${label}: ${entry.category}, ${entry.terrain}${col}${n}${dn}. Source: ${table.source}${ref}` };
 }
 
 export const categories = (t: BehaviourTable) => [...new Set(t.entries.map((e) => e.category))];
