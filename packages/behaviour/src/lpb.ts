@@ -4,11 +4,13 @@ import type { BehaviourEntry, BehaviourTable, Percentile } from './table.ts';
  * Figures from Robert J. Koester, Lost Person Behavior (dbS Productions, 2008),
  * typed from pages of the book that were seen while typing them:
  *
- * - Dementia, pp. 165–166: the chapter the publisher posts at
- *   https://www.dbs-sar.com/LPB/Dementia.pdf, checked 2026-10-07.
- * - Mental Illness (p. 201), Mental Retardation / Intellectual Disability
- *   (p. 208), Mountain Biker (p. 215), Other (p. 222) and Runner (p. 227):
- *   scans of the printed book supplied by the project owner, 2026-10-21.
+ * - Dementia: first checked 2026-10-07 against the chapter the publisher posts
+ *   at https://www.dbs-sar.com/LPB/Dementia.pdf (pp. 165–166 there), then
+ *   against p. 164 of the printed book on 2026-10-21; both agree.
+ * - Climber (p. 157), Despondent (p. 173), Hiker (pp. 184–185), Mental Illness
+ *   (p. 201), Mental Retardation / Intellectual Disability (p. 208), Mountain
+ *   Biker (p. 215), Other (p. 222) and Runner (p. 227): scans of the printed
+ *   book supplied by the project owner, 2026-10-21.
  *
  * Each row keeps the kilometre and mile values exactly as printed side by side,
  * and the tests check that they agree to within the book's rounding. The
@@ -18,7 +20,9 @@ import type { BehaviourEntry, BehaviourTable, Percentile } from './table.ts';
  * scenario, survivability, track offset, mobility and elevation tables are not
  * used by the generator. Columns with fewer than four printed percentiles are
  * left out (e.g. Mental Illness "Dry, All" prints only the median), as is BASE
- * jumper (n = 1, no distances printed).
+ * jumper (n = 1, no distances printed). So are rows the generator cannot draw:
+ * Climber "Day" (25% printed as 0.0 km) and the Despondent temperate dispersion
+ * angles (0, 0, 3, 30°).
  *
  * The book covers 41 subject categories. The rest are added by loading their
  * rows from the book (BehaviourTablePanel) or by typing them here from a page
@@ -44,7 +48,8 @@ type Four = readonly [number, number, number, number];
 
 /** One printed column of a "Distance (horizontal) from the IPP" table. */
 export interface LpbPrintedColumn {
-  category: (typeof LPB_CATEGORIES)[number];
+  /** One of LPB_CATEGORIES, or a sub-type the book prints as its own column (e.g. "climber (mountaineer)"). */
+  category: string;
   /** The column heading as printed, where it is not simply the terrain's name (e.g. "temperate non-mtn"). */
   column?: string;
   /** The terrains it applies to: an "All" column covers both of its ecoregion's terrains; no ecoregion given means "any". */
@@ -61,7 +66,7 @@ export interface LpbPrintedColumn {
 const dist = (chapter: string, page: string) => `${chapter} chapter, "Distance (horizontal) from the IPP" table, p. ${page}.`;
 
 export const LPB_PRINTED: readonly LpbPrintedColumn[] = [
-  // Dementia, pp. 165–166. Dispersion is printed for "Temperate" only (n = 11).
+  // Dementia, p. 164. Dispersion is printed for "Temperate" only (n = 11).
   ...([
     ['temperate mountainous', 95, [0.3, 0.8, 1.9, 8.3], [0.2, 0.5, 1.2, 5.1]],
     ['temperate flat', 175, [0.3, 1.0, 2.4, 12.8], [0.2, 0.6, 1.5, 7.9]],
@@ -75,7 +80,37 @@ export const LPB_PRINTED: readonly LpbPrintedColumn[] = [
     km,
     mi,
     ...(terrain.startsWith('temperate') ? { dispersion: { n: 11, deg: [11, 23, 66, 70] as const } } : {}),
-    ref: 'Dementia chapter, "Distance (horizontal) from the IPP" and "Dispersion Angle" tables, pp. 165–166.',
+    ref: 'Dementia chapter, "Distance (horizontal) from the IPP" and "Dispersion Angle" tables, p. 164.',
+  })),
+
+  // Climber, p. 157. The table splits by ecoregion (Temperate, Dry) and by type (Mountaineer, Day), each over all cases of that kind.
+  // "Dry" prints only the median (4.8 km), so it and the Dry dispersion angles (5, 28, 50, 71°, n = 6) are not loaded.
+  // "Day" (n = 8) prints 0.0 / 0.3 / 0.8 / 1.8 km; a 0.0 km ring cannot be drawn, so it is not loaded.
+  { category: 'climber', column: 'temperate', terrains: ['temperate mountainous', 'temperate flat'], n: 25, km: [0.2, 1.6, 3.2, 14.7], mi: [0.1, 1.0, 2.0, 9.2], ref: 'Climber chapter, "Distance from the IPP" table, p. 157.' },
+  { category: 'climber (mountaineer)', column: 'mountaineer', terrains: ['any'], n: 17, km: [0.1, 1.0, 3.0, 10.5], mi: [0.1, 0.6, 1.9, 6.5], ref: 'Climber chapter, "Distance from the IPP" table, Mountaineer column, p. 157.' },
+
+  // Despondent, p. 173. The Temperate dispersion angles (0, 0, 3, 30°, n = 6) cannot be drawn as wedges and are not loaded.
+  // Two 95% values sit further from the printed miles than rounding explains; the printed km are used (see the test).
+  { category: 'despondent', terrains: ['temperate mountainous'], n: 103, km: [0.3, 1.1, 3.2, 21.6], mi: [0.2, 0.7, 2.0, 13.3], ref: dist('Despondent', '173') },
+  { category: 'despondent', terrains: ['temperate flat'], n: 193, km: [0.3, 0.8, 2.3, 17.3], mi: [0.2, 0.5, 1.4, 10.7], ref: dist('Despondent', '173') },
+  { category: 'despondent', terrains: ['dry mountainous'], n: 20, km: [0.8, 1.6, 3.4, 18.0], mi: [0.5, 1.0, 2.1, 11.1], ref: dist('Despondent', '173') },
+  { category: 'despondent', terrains: ['dry flat'], n: 14, km: [0.5, 1.9, 3.7, 20.7], mi: [0.3, 1.2, 2.3, 12.8], ref: dist('Despondent', '173') },
+  { category: 'despondent', terrains: ['urban'], n: 96, km: [0.1, 0.5, 1.5, 13.1], mi: [0.06, 0.3, 0.9, 8.1], ref: dist('Despondent', '173') },
+
+  // Hiker, distances p. 184, dispersion p. 185 (Temperate n = 134, Dry n = 28). "Urban" (n = 8) prints only the median, so it is not loaded.
+  ...([
+    ['temperate mountainous', 568, [1.1, 3.1, 5.8, 18.3], [0.7, 1.9, 3.6, 11.3]],
+    ['temperate flat', 274, [0.6, 1.8, 3.2, 9.9], [0.4, 1.1, 2.0, 6.1]],
+    ['dry mountainous', 221, [1.6, 3.2, 6.5, 19.3], [1.0, 2.0, 4.0, 11.9]],
+    ['dry flat', 58, [1.3, 2.1, 6.6, 13.1], [0.8, 1.3, 4.1, 8.1]],
+  ] as const).map(([terrain, n, km, mi]) => ({
+    category: 'hiker',
+    terrains: [terrain],
+    n,
+    km,
+    mi,
+    dispersion: terrain.startsWith('temperate') ? { n: 134, deg: [2, 23, 64, 132] as const } : { n: 28, deg: [20, 47, 124, 175] as const },
+    ref: 'Hiker chapter, "Distance (horizontal) from the IPP" table, p. 184, and "Dispersion Angle" table, p. 185.',
   })),
 
   // Mental Illness, p. 201. No dispersion table. "Dry, All" (n = 8) prints only the median (1.0 km), so it is not loaded.
